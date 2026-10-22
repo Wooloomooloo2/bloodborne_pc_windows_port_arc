@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+#include <cstring>
 #include <boost/container/static_vector.hpp>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -13,6 +15,7 @@
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
+#include "video_core/renderer_vulkan/vk_xess.h"
 
 #include <vk_mem_alloc.h>
 
@@ -236,7 +239,7 @@ bool Instance::CreateDevice() {
         return false;
     }
 
-    boost::container::static_vector<const char*, 32> enabled_extensions;
+    boost::container::static_vector<const char*, 48> enabled_extensions;
     const auto add_extension = [&](std::string_view extension) -> bool {
         const auto result =
             std::find_if(available_extensions.begin(), available_extensions.end(),
@@ -612,6 +615,28 @@ bool Instance::CreateDevice() {
     }
     if (!mixed_float_dot_product) {
         device_chain.unlink<vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE>();
+    }
+
+    // bbport: Intel XeSS (vk_xess.h) needs its device extensions and features enabled here;
+    // without libxess.dll, or on a device lacking them, upscaler=xess falls back to FSR 3.1.
+    if (std::vector<const char*> xess_extensions;
+        Xess::DeviceExtensions(*instance, physical_device, xess_extensions)) {
+        bool all = true;
+        for (const char* extension : xess_extensions) {
+            const bool enabled =
+                std::any_of(enabled_extensions.begin(), enabled_extensions.end(),
+                            [&](const char* name) { return std::strcmp(name, extension) == 0; });
+            if (!enabled && (enabled_extensions.size() == enabled_extensions.capacity() ||
+                             !add_extension(extension))) {
+                all = false;
+            }
+        }
+        xess_supported =
+            all && Xess::ChainDeviceFeatures(*instance, physical_device,
+                                             &device_chain.get<vk::PhysicalDeviceFeatures2>());
+        auto& device_info = device_chain.get<vk::DeviceCreateInfo>();
+        device_info.enabledExtensionCount = static_cast<u32>(enabled_extensions.size());
+        device_info.ppEnabledExtensionNames = enabled_extensions.data();
     }
 
     auto [device_result, dev] = physical_device.createDeviceUnique(device_chain.get());

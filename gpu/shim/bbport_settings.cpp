@@ -56,6 +56,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.fsr4_auto_exposure = i != 0;
     } else if (key == "fsr4_invert_jitter") {
         v.fsr4_invert_jitter = i != 0;
+    } else if (key == "xess_invert_jitter") {
+        v.xess_invert_jitter = i != 0;
     } else if (key == "model_lod") {
         v.model_lod = std::clamp(i, -2, 2);
     } else if (key == "live_resolution") {
@@ -130,11 +132,17 @@ void Load() {
     v.startup_live_resolution = v.live_resolution;
 }
 
-void ConfigureUpscalerSupport(bool fsr4, bool fsr411) {
+void ConfigureUpscalerSupport(bool fsr4, bool fsr411, bool xess) {
     auto& v = Get();
     v.fsr4_supported = fsr4;
     v.fsr411_supported = fsr4 && fsr411;
+    v.xess_supported = xess;
     const int requested = v.upscaler;
+    if (requested == UpscalerXess && !xess) {
+        v.xess_problem = "not available (libxess.dll or GPU support); using FSR 3.1";
+        std::printf("Upscaler: xess unavailable; falling back to FSR 3.1 before the first frame\n");
+        v.upscaler = UpscalerFsr3;
+    }
     if ((requested == UpscalerFsr4 && !v.fsr4_supported) ||
         (requested == UpscalerFsr411 && !v.fsr411_supported)) {
         v.fsr4_problem = "GPU does not support the selected FSR 4 shaders; using FSR 3.1";
@@ -175,13 +183,15 @@ void Save() {
                  "# bbport settings (in-game menu: Insert / L3+R3)\n"
                  "upscaler=%s\npreset=%d\nsharpen=%d\nsharpness=%.2f\njitter=%d\n"
                  "reactive=%d\nobject_motion=%d\nreactive_scale=%.2f\nreactive_threshold=%.2f\nreactive_max=%.2f\n"
-                 "debug_view=%d\nshow_fps=%d\nfsr4_auto_exposure=%d\nfsr4_invert_jitter=%d\n",
+                 "debug_view=%d\nshow_fps=%d\nfsr4_auto_exposure=%d\nfsr4_invert_jitter=%d\n"
+                 "xess_invert_jitter=%d\n",
                  UpscalerName(v.upscaler), v.preset.load(), int(v.sharpen.load()),
                  v.sharpness.load(), int(v.jitter.load()), int(v.reactive.load()),
                  int(v.object_motion.load()),
                  v.reactive_scale.load(), v.reactive_threshold.load(), v.reactive_max.load(),
                  v.debug_view.load(), int(v.show_fps.load()),
-                 int(v.fsr4_auto_exposure.load()), int(v.fsr4_invert_jitter.load()));
+                 int(v.fsr4_auto_exposure.load()), int(v.fsr4_invert_jitter.load()),
+                 int(v.xess_invert_jitter.load()));
     // Read by patches.py at start.
     for (int e = 0; e < EffectCount; ++e) {
         std::fprintf(file, "%s=%d\n", Effects[e].key, int(v.effects[e].load()));
@@ -206,7 +216,8 @@ const char* PresetName(int preset) {
 }
 
 const char* UpscalerName(int upscaler) {
-    static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa"};
+    static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa",
+                                                                  "xess"};
     return names[std::clamp(upscaler, 0, UpscalerCount - 1)];
 }
 

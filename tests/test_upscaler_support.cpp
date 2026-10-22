@@ -49,6 +49,7 @@ int main() {
     assert(RenderPreset() == Performance);
     for (bool fsr4 : {false, true}) {
         for (bool fsr411 : {false, true}) {
+          for (bool xess : {false, true}) {
             for (int requested = 0; requested < UpscalerCount; ++requested) {
                 FILE* config = std::fopen(path, "w");
                 assert(config);
@@ -56,21 +57,27 @@ int main() {
                              UpscalerName(requested));
                 std::fclose(config);
                 s.fsr4_problem = nullptr;
+                s.xess_problem = nullptr;
                 Load();
                 assert(s.upscaler == requested);
-                ConfigureUpscalerSupport(fsr4, fsr411);
-                const bool unsupported = (requested == UpscalerFsr4 && !fsr4) ||
+                ConfigureUpscalerSupport(fsr4, fsr411, xess);
+                const bool fsr4_unsupported = (requested == UpscalerFsr4 && !fsr4) ||
                     (requested == UpscalerFsr411 && !(fsr4 && fsr411));
+                const bool xess_unsupported = requested == UpscalerXess && !xess;
+                const bool unsupported = fsr4_unsupported || xess_unsupported;
                 assert(s.upscaler == (unsupported ? UpscalerFsr3 : requested));
                 assert(s.fsr4_supported == fsr4);
                 assert(s.fsr411_supported == (fsr4 && fsr411));
-                assert(bool(s.fsr4_problem.load()) == unsupported);
+                assert(bool(s.fsr4_problem.load()) == fsr4_unsupported);
+                assert(bool(s.xess_problem.load()) == xess_unsupported);
+                assert(s.xess_supported == xess);
                 assert(s.preset == Performance && s.output_res == 2);
                 // Startup patch settings still describe the already applied guest patches.
                 assert(s.startup_upscaler == requested);
-                ConfigureUpscalerSupport(fsr4, fsr411);
+                ConfigureUpscalerSupport(fsr4, fsr411, xess);
                 assert(s.upscaler == (unsupported ? UpscalerFsr3 : requested));
             }
+          }
         }
     }
     s.startup_preset = Quality;

@@ -1,0 +1,311 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="BloodborneLauncher.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:BloodborneLauncher"
+    xmlns:controls="using:CommunityToolkit.WinUI.Controls"
+    Title="Bloodborne">
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <Grid x:Name="Root">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Title bar (the content extends into it). -->
+        <Grid x:Name="AppTitleBar" Grid.Row="0" Padding="16,0,0,0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Image Source="ms-appx:///Assets/AppIcon.png" Width="18" Height="18" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="Bloodborne" VerticalAlignment="Center"
+                       Style="{StaticResource CaptionTextBlockStyle}" />
+        </Grid>
+
+        <ScrollViewer Grid.Row="1" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
+            <!-- Read-only while the game runs: it rewrites bbport.ini from its own menu. -->
+            <ContentControl IsEnabled="{x:Bind ViewModel.CanEdit, Mode=OneWay}" IsTabStop="False"
+                            HorizontalContentAlignment="Stretch" HorizontalAlignment="Stretch">
+            <Grid x:Name="Columns" Margin="28,0,28,24" MaxWidth="1240">
+                <Grid.Resources>
+                    <!-- Rows keep the control beside the label down to narrower cards than the
+                         toolkit's default (476), so both columns stay one line per row. -->
+                    <x:Double x:Key="SettingsCardWrapThreshold">360</x:Double>
+                    <x:Double x:Key="SettingsCardWrapNoIconThreshold">300</x:Double>
+                </Grid.Resources>
+                <Grid.ColumnDefinitions>
+                    <!-- The left column's rows carry the wider controls (segments, combos). -->
+                    <ColumnDefinition Width="11*" />
+                    <ColumnDefinition Width="28" />
+                    <ColumnDefinition Width="9*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- ========================= Left column ========================= -->
+                <StackPanel x:Name="LeftColumn" Grid.Column="0">
+
+                    <TextBlock Text="Display" Style="{StaticResource SectionHeaderStyle}" />
+                    <Border Style="{StaticResource GroupStyle}">
+                        <StackPanel>
+                            <controls:SettingsCard Header="Output resolution" Style="{StaticResource RowStyle}">
+                                <ComboBox Style="{StaticResource RowComboStyle}"
+                                          ItemsSource="{x:Bind ViewModel.OutputLabels}"
+                                          SelectedIndex="{x:Bind ViewModel.OutputResIndex, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Window" Style="{StaticResource RowStyle}">
+                                <controls:Segmented SelectedIndex="{x:Bind ViewModel.WindowModeIndex, Mode=TwoWay}">
+                                    <controls:SegmentedItem Content="Windowed" />
+                                    <controls:SegmentedItem Content="Full screen" />
+                                </controls:Segmented>
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Frame rate cap" Style="{StaticResource RowStyle}">
+                                <controls:Segmented SelectedIndex="{x:Bind ViewModel.FpsIndex, Mode=TwoWay}">
+                                    <controls:SegmentedItem Content="30" />
+                                    <controls:SegmentedItem Content="60" />
+                                    <controls:SegmentedItem Content="90" />
+                                    <controls:SegmentedItem Content="Uncapped" />
+                                </controls:Segmented>
+                            </controls:SettingsCard>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="Upscaler" Style="{StaticResource SectionHeaderStyle}" />
+                    <Border Style="{StaticResource GroupStyle}">
+                        <StackPanel>
+                            <controls:SettingsCard Header="Upscaler" Style="{StaticResource RowStyle}">
+                                <ComboBox Style="{StaticResource RowComboStyle}"
+                                          ItemsSource="{x:Bind ViewModel.UpscalerLabels}"
+                                          SelectedIndex="{x:Bind ViewModel.UpscalerIndex, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Quality" Style="{StaticResource RowStyle}"
+                                                   IsEnabled="{x:Bind ViewModel.IsPresetEnabled, Mode=OneWay}">
+                                <ComboBox Style="{StaticResource RowComboStyle}"
+                                          ItemsSource="{x:Bind ViewModel.PresetLabels}"
+                                          SelectedIndex="{x:Bind ViewModel.PresetIndex, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Sharpness" Style="{StaticResource RowStyle}"
+                                                   IsEnabled="{x:Bind ViewModel.IsUpscalerOn, Mode=OneWay}">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <Slider Width="150" Minimum="0" Maximum="2" StepFrequency="0.05"
+                                            VerticalAlignment="Center"
+                                            IsEnabled="{x:Bind ViewModel.Sharpen, Mode=OneWay}"
+                                            Value="{x:Bind ViewModel.Sharpness, Mode=TwoWay}" />
+                                    <TextBlock Text="{x:Bind ViewModel.SharpnessText, Mode=OneWay}" Width="32"
+                                               VerticalAlignment="Center"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <ToggleSwitch IsOn="{x:Bind ViewModel.Sharpen, Mode=TwoWay}" OnContent="" OffContent=""
+                                                  MinWidth="0" Width="48"
+                                                  ToolTipService.ToolTip="Sharpen the upscaled image" />
+                                </StackPanel>
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Renders" Style="{StaticResource RowStyle}">
+                                <TextBlock Text="{x:Bind ViewModel.RendersText, Mode=OneWay}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </controls:SettingsCard>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="Advanced" Style="{StaticResource SectionHeaderStyle}" />
+                    <Border Style="{StaticResource GroupStyle}">
+                        <StackPanel>
+                            <controls:SettingsCard Header="GPU" Style="{StaticResource RowStyle}">
+                                <TextBlock Text="{x:Bind ViewModel.GpuName, Mode=OneWay}" MaxWidth="280"
+                                           TextTrimming="CharacterEllipsis" IsTextSelectionEnabled="True"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Anisotropic filtering" Style="{StaticResource RowStyle}">
+                                <ComboBox Style="{StaticResource RowComboStyle}"
+                                          ItemsSource="{x:Bind ViewModel.AnisoLabels}"
+                                          SelectedIndex="{x:Bind ViewModel.AnisoIndex, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Frame stats in log" Style="{StaticResource RowStyle}">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.FrameStats, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsExpander x:Name="EngineOptions" Header="Engine options"
+                                                       Description="Feature switches, community patches"
+                                                       Background="Transparent" BorderThickness="0" CornerRadius="0,0,8,8">
+                                <controls:SettingsExpander.Items>
+                                    <controls:SettingsCard Header="Object motion vectors">
+                                        <ToggleSwitch IsOn="{x:Bind ViewModel.ObjectMotion, Mode=TwoWay}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Header="In-game overlay menu" Description="Insert / L3+R3">
+                                        <ToggleSwitch IsOn="{x:Bind ViewModel.Overlay, Mode=TwoWay}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Header="FPS patch" Description="Needed for 60, 90 and uncapped">
+                                        <ToggleSwitch IsOn="{x:Bind ViewModel.FpsPatch, Mode=TwoWay}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Header="Mods folder" Description="Load files from mods\">
+                                        <ToggleSwitch IsOn="{x:Bind ViewModel.Mods, Mode=TwoWay}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Header="Resolution scaling">
+                                        <ToggleSwitch IsOn="{x:Bind ViewModel.ResScaling, Mode=TwoWay}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Header="Render resolution override"
+                                                           Description="Fixed scene size (BB_RENDER_RES)"
+                                                           IsEnabled="{x:Bind ViewModel.ResScaling, Mode=OneWay}">
+                                        <ComboBox Style="{StaticResource RowComboStyle}"
+                                                  ItemsSource="{x:Bind ViewModel.RenderResLabels}"
+                                                  SelectedIndex="{x:Bind ViewModel.RenderResIndex, Mode=TwoWay}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Header="Debug tracing" Description="Heartbeat and hang dump">
+                                        <ToggleSwitch IsOn="{x:Bind ViewModel.Tracing, Mode=TwoWay}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Header="Watchdog">
+                                        <ToggleSwitch IsOn="{x:Bind ViewModel.Watchdog, Mode=TwoWay}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Header="Timeout" Description="Stop the game after this long">
+                                        <ComboBox Style="{StaticResource RowComboStyle}"
+                                                  ItemsSource="{x:Bind ViewModel.TimeoutLabels}"
+                                                  SelectedIndex="{x:Bind ViewModel.TimeoutIndex, Mode=TwoWay}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Header="GPU draw prep workers">
+                                        <ToggleSwitch IsOn="{x:Bind ViewModel.DrawPrep, Mode=TwoWay}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Header="Community patches"
+                                                           Description="{x:Bind ViewModel.PatchSummary, Mode=OneWay}">
+                                        <Button Content="XML patches…" Click="OnPatches" />
+                                    </controls:SettingsCard>
+                                </controls:SettingsExpander.Items>
+                            </controls:SettingsExpander>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- ========================= Right column ========================= -->
+                <StackPanel x:Name="RightColumn" Grid.Column="2">
+
+                    <TextBlock Text="Effects" Style="{StaticResource SectionHeaderStyle}" />
+                    <Border Style="{StaticResource GroupStyle}">
+                        <StackPanel>
+                            <controls:SettingsCard Header="Depth of field" Style="{StaticResource RowStyle}">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.Dof, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Motion blur" Style="{StaticResource RowStyle}">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.MotionBlur, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Chromatic aberration" Style="{StaticResource RowStyle}">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.ChromaticAberration, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Ambient occlusion (SSAO)" Style="{StaticResource RowStyle}">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.Ssao, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Shadows from dynamic lights" Style="{StaticResource RowStyle}">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.DynamicShadows, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Screen-space reflections" Description="Not in the original game"
+                                                   Style="{StaticResource RowStyle}">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.Ssr, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="The game's own anti-aliasing" Style="{StaticResource RowStyle}">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.GameAa, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Show FPS" Style="{StaticResource RowStyle}">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.ShowFps, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Skip intro videos" Style="{StaticResource RowStyle}">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.SkipIntro, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="Locations" Style="{StaticResource SectionHeaderStyle}" />
+                    <Border Style="{StaticResource GroupStyle}">
+                        <StackPanel>
+                            <StackPanel.Resources>
+                                <!-- Paths read best on one line: the buttons go below them. -->
+                                <x:Double x:Key="SettingsCardWrapThreshold">100000</x:Double>
+                                <x:Double x:Key="SettingsCardWrapNoIconThreshold">100000</x:Double>
+                            </StackPanel.Resources>
+                            <controls:SettingsCard Header="Game folder" Style="{StaticResource RowStyle}">
+                                <controls:SettingsCard.Description>
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="{x:Bind ViewModel.GameDirText, Mode=OneWay}" Style="{StaticResource PathTextStyle}" />
+                                        <TextBlock Text="{x:Bind ViewModel.GameDirError, Mode=OneWay}"
+                                                   Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                                                   Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                                   Visibility="{x:Bind local:Bind.Visible(ViewModel.HasGameDirError), Mode=OneWay}" />
+                                    </StackPanel>
+                                </controls:SettingsCard.Description>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <DropDownButton Content="Choose…">
+                                        <DropDownButton.Flyout>
+                                            <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                                <MenuFlyoutItem Text="Game folder…" Click="OnChooseGameFolder" />
+                                                <MenuFlyoutItem Text="eboot.bin…" Click="OnChooseEboot" />
+                                            </MenuFlyout>
+                                        </DropDownButton.Flyout>
+                                    </DropDownButton>
+                                    <Button Content="Reset to Default" Click="OnResetGame"
+                                            IsEnabled="{x:Bind ViewModel.IsGameDirCustom, Mode=OneWay}" />
+                                </StackPanel>
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Save folder" Style="{StaticResource RowStyle}">
+                                <controls:SettingsCard.Description>
+                                    <TextBlock Text="{x:Bind ViewModel.UserDirText, Mode=OneWay}" Style="{StaticResource PathTextStyle}" />
+                                </controls:SettingsCard.Description>
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Content="Choose…" Click="OnChooseUserDir" />
+                                    <Button Content="Reset to Default" Click="OnResetUserDir"
+                                            IsEnabled="{x:Bind ViewModel.IsUserDirCustom, Mode=OneWay}" />
+                                </StackPanel>
+                            </controls:SettingsCard>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Grid>
+            </ContentControl>
+        </ScrollViewer>
+
+        <InfoBar x:Name="Status" Grid.Row="2" Margin="28,0,28,12" IsOpen="False" IsClosable="True">
+            <InfoBar.ActionButton>
+                <Button x:Name="StatusAction" Content="Open log" Click="OnOpenLogFile" />
+            </InfoBar.ActionButton>
+        </InfoBar>
+
+        <!-- Footer -->
+        <Grid Grid.Row="3" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0"
+              Padding="28,14,28,14" ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <CheckBox Content="Show launcher every time" VerticalAlignment="Center"
+                      IsChecked="{x:Bind ViewModel.ShowLauncher, Mode=TwoWay}"
+                      ToolTipService.ToolTip="Off: Bloodborne.exe starts the game at once with these settings (hold Shift to see the launcher)" />
+            <HyperlinkButton Grid.Column="1" Content="Log" VerticalAlignment="Center" Click="OnShowLog" />
+            <Button x:Name="PlayButton" Grid.Column="2" Style="{StaticResource AccentButtonStyle}"
+                    MinWidth="148" Height="40" FontSize="16" FontWeight="SemiBold"
+                    Content="{x:Bind ViewModel.PlayText, Mode=OneWay}"
+                    IsEnabled="{x:Bind ViewModel.CanPlay, Mode=OneWay}"
+                    Click="OnPlay" />
+        </Grid>
+    </Grid>
+</Window>

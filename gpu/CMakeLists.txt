@@ -219,6 +219,16 @@ if (NOT WIN32)
     target_link_options(bbgpu PRIVATE -Wl,--allow-shlib-undefined)
 endif()
 target_link_libraries(bbgpu PRIVATE ffx-vulkan::portable ffx-vulkan::fsr4-v07-vulkan)
+# bbport: Intel XeSS SR (upscaler=xess) when tools/fetch_xess_sdk.ps1 has installed the SDK.
+# Only the headers are used at build time; libxess.dll is loaded at run time (vk_xess.cpp).
+set(BB_XESS_SDK "${CMAKE_CURRENT_SOURCE_DIR}/third_party/xess-sdk")
+if (WIN32 AND EXISTS "${BB_XESS_SDK}/inc/xess/xess_vk.h")
+    message(STATUS "XeSS SDK: ${BB_XESS_SDK}")
+    target_include_directories(bbgpu SYSTEM PRIVATE "${BB_XESS_SDK}/inc")
+    target_compile_definitions(bbgpu PRIVATE BBPORT_XESS=1)
+else()
+    message(STATUS "XeSS SDK not found (tools/fetch_xess_sdk.ps1): upscaler=xess unavailable")
+endif()
 if (WIN32)
     target_link_libraries(bbgpu PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
         tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 PkgConfig::FFMPEG miniz::miniz Zydis::Zydis sirit ws2_32)

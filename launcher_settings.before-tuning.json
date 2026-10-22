@@ -1,0 +1,20 @@
+{
+  "eboot": "C:\\Users\\hallm\\Games\\CUSA03173\\eboot.bin",
+  "fps": "60",
+  "res": "Default (1080p)",
+  "aniso": "16x",
+  "timeout": "0",
+  "mods": true,
+  "hide_vk": true,
+  "feat_upscaler": true,
+  "feat_object_motion": true,
+  "feat_overlay": true,
+  "feat_fps_patch": true,
+  "feat_res_scaling": true,
+  "feat_tracing": true,
+  "feat_watchdog": true,
+  "feat_draw_prep": true,
+  "enabled_patches": [
+    "Skip Intro"
+  ]
+}

@@ -128,4 +128,15 @@ if objdump:
                             except OSError:
                                 pass
 
+# Intel XeSS (tools/fetch_xess_sdk.ps1): loaded at run time, so objdump does not see it.
+xess = Path("gpu/third_party/xess-sdk")
+if (xess / "bin" / "libxess.dll").is_file():
+    for src, name in ((xess / "bin" / "libxess.dll", "libxess.dll"),
+                      (xess / "LICENSE.txt", "libxess.LICENSE.txt"),
+                      (xess / "third-party-programs.txt", "libxess.third-party-programs.txt")):
+        dst = out / name
+        if src.is_file() and (not dst.is_file() or dst.stat().st_mtime < src.stat().st_mtime):
+            shutil.copy2(src, dst)
+            staged += 1
+
 print(f"Runtime DLL staging complete ({staged} new DLLs staged).")

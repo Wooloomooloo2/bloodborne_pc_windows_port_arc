@@ -294,6 +294,12 @@ public:
         return IsFsr4Int8Supported() && mixed_float_dot_product;
     }
 
+    /// bbport: Intel XeSS (vk_xess.h): libxess.dll loaded and its device extensions and
+    /// features enabled at device creation.
+    bool IsXessSupported() const {
+        return xess_supported;
+    }
+
     /// VK_KHR_shader_clock is supported.
     bool IsShaderSubgroupClockSupported() const {
         return shader_clock && shader_clock_features.shaderSubgroupClock;
@@ -575,6 +581,7 @@ private:
     bool shader_clock{};
     bool compute_shader_derivatives{};
     bool mixed_float_dot_product{}; // bbport: VK_VALVE_shader_mixed_float_dot_product (FSR 4.1.1)
+    bool xess_supported{};          // bbport: Intel XeSS requirements enabled (vk_xess.h)
     bool supports_memory_budget{};
     bool supports_block_texel_view{};
     u64 total_memory_budget{};

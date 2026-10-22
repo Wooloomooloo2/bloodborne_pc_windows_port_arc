@@ -2,6 +2,14 @@
 setlocal
 cd /d "%~dp0"
 
+rem The native launcher (launcher-win\build-launcher.bat builds it) when present; else the
+rem Python one. Exactly one starts. Either inherits this environment, so variables set by
+rem the caller ("Play Bloodborne.bat") reach the game.
+if exist "%~dp0out\launcher\Bloodborne.exe" (
+    start "" "%~dp0out\launcher\Bloodborne.exe"
+    exit /b 0
+)
+
 set "PYTHON_EXE="
 for %%P in (
     "C:\Program Files\Python313\python.exe"
@@ -26,7 +34,8 @@ if not defined PYTHON_EXE (
 )
 
 if not defined PYTHON_EXE (
-    echo [ERROR] Python not found. Please install Python 3.10+ and add it to PATH.
+    echo [ERROR] Python not found. Please install Python 3.10+ and add it to PATH,
+    echo or build the native launcher with launcher-win\build-launcher.bat.
     pause
     exit /b 1
 )

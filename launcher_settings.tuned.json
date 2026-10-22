@@ -1,0 +1,23 @@
+{
+  "eboot": "C:\\Users\\hallm\\Games\\CUSA03173\\eboot.bin",
+  "fps": "60",
+  "res": "Default (1080p)",
+  "aniso": "16x",
+  "timeout": "0",
+  "mods": true,
+  "hide_vk": true,
+  "feat_upscaler": false,
+  "feat_object_motion": true,
+  "feat_overlay": true,
+  "feat_fps_patch": true,
+  "feat_res_scaling": true,
+  "feat_tracing": false,
+  "feat_watchdog": false,
+  "feat_draw_prep": true,
+  "enabled_patches": [
+    "Disable Chromatic Aberration",
+    "Disable Motion Blur (perf increase)",
+    "Intel 12th Gen+ SFX workaround",
+    "Skip Intro"
+  ]
+}

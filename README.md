@@ -89,6 +89,13 @@ launch_gui.bat
 - Enable desired patches under the Patches tab (e.g., *Performance Patch*, *Disable Motion Blur*, *Skip Intro*).
 - Click **Launch Bloodborne**.
 
+##### Native launcher (WinUI 3)
+A native Windows launcher replaces the Python one when it is built. It needs the [.NET 10 SDK](https://dot.net) to build (nothing extra to run):
+```cmd
+launcher-win\build-launcher.bat
+```
+This publishes `out\launcher\Bloodborne.exe`; `launch_gui.bat` then starts it instead of `launcher.py` (which stays as the fallback). The native launcher owns `bbport.ini` for the display, upscaler and effect settings (the in-game menu writes the same file) and keeps the rest in `launcher_settings.json`. Untick **Show launcher every time** to have `Bloodborne.exe` start the game straight away; hold **Shift** while starting it to see the launcher again. The **Log** link in the footer shows the live output; the full log is `launcher.log`.
+
 #### Option B: Using the Command Line
 Run `run.bat` pointing to your game directory:
 ```cmd

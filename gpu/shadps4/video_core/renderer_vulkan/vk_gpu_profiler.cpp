@@ -11,14 +11,14 @@ namespace Vulkan {
 
 void GpuProfiler::Init(const Instance& instance, Scheduler& scheduler) {
     const char* env = std::getenv("BB_GPU_PROFILE");
-    if (!env || env[0] != '1' || instance_ptr) {
+    if (!env || (env[0] != '1' && env[0] != '2') || instance_ptr) {
         return;
     }
-    instance_ptr = new GpuProfiler(instance, scheduler);
+    instance_ptr = new GpuProfiler(instance, scheduler, env[0] - '0');
 }
 
-GpuProfiler::GpuProfiler(const Instance& instance, Scheduler& scheduler_)
-    : device{instance.GetDevice()}, scheduler{scheduler_} {
+GpuProfiler::GpuProfiler(const Instance& instance, Scheduler& scheduler_, int level_)
+    : device{instance.GetDevice()}, scheduler{scheduler_}, level{level_} {
     const vk::QueryPoolCreateInfo info = {
         .queryType = vk::QueryType::eTimestamp,
         .queryCount = NumSlices * SliceQueries,
@@ -29,16 +29,19 @@ GpuProfiler::GpuProfiler(const Instance& instance, Scheduler& scheduler_)
     for (auto& k : keys) {
         k.reserve(SliceQueries);
     }
-    std::printf("GPU profile: on (timestamp period %.2f ns)\n", period_ns);
+    std::printf("GPU profile: on (timestamp period %.2f ns, level %d%s)\n", period_ns, level,
+                level >= 2 ? ": per shader pair inside passes" : "");
 }
 
-void GpuProfiler::WriteTimestamp(u64 key) {
+void GpuProfiler::WriteTimestamp(u64 key, bool end_rendering) {
     if (used[slice] + 1 >= SliceQueries) {
         return; // the frame's slice is full: the rest of the frame goes to the last label
     }
     // Outside render passes: radv_CmdWriteTimestamp2 crashed inside some. Marks sit where a
-    // pass, dispatch or submission ends anyway.
-    scheduler.EndRendering();
+    // pass, dispatch or submission ends anyway. Level 2 draw marks stay inside the pass.
+    if (end_rendering) {
+        scheduler.EndRendering();
+    }
     const u32 query = slice * SliceQueries + used[slice]++;
     keys[slice].push_back(key);
     current = key;
@@ -104,7 +107,7 @@ void GpuProfiler::Print() {
     }
     std::printf("GPU profile: %.2f ms/frame over %llu frames, %zu labels\n", sum / frames,
                 static_cast<unsigned long long>(frames), sorted.size());
-    for (size_t i = 0; i < std::min<size_t>(sorted.size(), 30); ++i) {
+    for (size_t i = 0; i < std::min<size_t>(sorted.size(), level >= 2 ? 60 : 30); ++i) {
         const auto& [key, total] = sorted[i];
         std::printf("  %6.3f ms/frame %5.1f/frame  %s\n", total.ms / frames,
                     double(total.segments) / frames, described[key].c_str());

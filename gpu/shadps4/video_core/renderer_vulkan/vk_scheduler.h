@@ -16,6 +16,11 @@
 #include <mutex>
 #include <thread>
 #include <queue>
+#ifdef _WIN32
+#include <intrin.h>
+#else
+#include <unistd.h>
+#endif
 
 #include "bbport_toggles.h"
 #include "common/assert.h"
@@ -714,6 +719,7 @@ public:
     /// records directly (Record() included, so callers may mix both) until the next
     /// KickRecording() or submission.
     [[gnu::noinline]] vk::CommandBuffer CommandBuffer() {
+        CheckOwner(__builtin_return_address(0));
         if (recorder_running && !direct_mode) {
             SyncRecording();
             direct_mode = true;
@@ -730,6 +736,7 @@ public:
     /// everything it uses (capture by value): it may run later on the recording thread.
     template <typename Func>
     void Record(Func&& func) {
+        CheckOwner(__builtin_return_address(0));
         if (!recorder_running || direct_mode) {
             func(current_cmdbuf);
             return;
@@ -757,6 +764,7 @@ public:
     /// Makes room for `bytes` of RecordData() plus the command that uses them in the current
     /// chunk: data and command must share a chunk, which is recycled once executed.
     void ReserveRecordData(size_t bytes) {
+        CheckOwner(__builtin_return_address(0));
         if (!IsRecordingDeferred()) {
             return;
         }
@@ -869,7 +877,40 @@ public:
 
     static std::mutex submit_mutex;
 
+    /// bbport: while the draw recording thread (vk_draw_pipe.h) has packets in flight it owns
+    /// this scheduler's recording state (record_chunk, full_chunks, direct_mode), which has no
+    /// lock. Any other thread recording here then calls `hook(context, caller)`: the rasterizer
+    /// drains the pipeline when that thread is the GPU command thread and reports the caller.
+    /// A recording from both threads at once lost record_chunk to the other's KickRecording
+    /// (null chunk in Record, a crash every few hours of play).
+    using OwnerHook = void (*)(void* context, void* caller);
+    void SetOwnerHook(OwnerHook hook, void* context, const std::atomic<u32>* owner_tid) {
+        owner_hook_context = context;
+        owner_tid_ref = owner_tid;
+        owner_hook = hook;
+    }
+
+    /// The calling thread's id: the value GetCurrentThreadId() returns (stage B's id).
+    [[nodiscard]] static u32 CurrentThreadId() noexcept {
+#ifdef _WIN32
+        return __readgsdword(0x48); // TEB ClientId.UniqueThread
+#else
+        static thread_local const u32 tid = static_cast<u32>(gettid());
+        return tid;
+#endif
+    }
+
 private:
+    [[gnu::always_inline]] void CheckOwner(void* caller) {
+        if (owner_hook && CurrentThreadId() != owner_tid_ref->load(std::memory_order_relaxed)) {
+            owner_hook(owner_hook_context, caller);
+        }
+    }
+
+    OwnerHook owner_hook = nullptr;
+    void* owner_hook_context = nullptr;
+    const std::atomic<u32>* owner_tid_ref = nullptr;
+
     void AllocateWorkerCommandBuffers();
 
     std::unique_ptr<RecordChunk> AcquireChunk();

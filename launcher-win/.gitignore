@@ -1,0 +1,6 @@
+bin/
+obj/
+*.user
+.vs/
+# The app icon (the repository ignores *.png).
+!BloodborneLauncher/Assets/*.png

@@ -356,7 +356,10 @@ constexpr NumberConversion MapNumberConversion(const NumberFormat num_fmt,
         case DataFormat::Format16_16_16_16:
             return NumberConversion::Sint16ToSnormNz;
         default:
-            UNREACHABLE_MSG("data_fmt = {}", u32(data_fmt));
+            // bbport: GCN defines no SNORM_NZ for 32-bit (or packed) components; hardware
+            // reads the raw bits. Bloodborne binds such a descriptor (Format32_32_32 seen
+            // 2026-10-18), and asserting here stopped the game.
+            return NumberConversion::None;
         }
     }
     default:

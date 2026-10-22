@@ -54,6 +54,10 @@ public:
     [[nodiscard]] u32 StageBThreadId() const noexcept {
         return stage_b_tid.load(std::memory_order_acquire);
     }
+    /// For Scheduler::SetOwnerHook: compared with the recording thread on every Record().
+    [[nodiscard]] const std::atomic<u32>* StageBThreadIdRef() const noexcept {
+        return &stage_b_tid;
+    }
 
     /// Stage A: space for a packet of `size` bytes (8-byte aligned), valid until Commit().
     u8* Begin(u32 size) {
@@ -120,6 +124,22 @@ public:
         const u64 waited = __rdtsc() - start;
         drain_cycles += waited;
         cycles_by_reason[slot] += waited;
+    }
+
+    /// Stage A: Drain() that gives up after `timeout` (returns false) instead of waiting for a
+    /// stage B that may itself wait for something the caller holds.
+    bool TryDrain(std::chrono::steady_clock::duration timeout) {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        for (u32 spins = 0; consumed.load(std::memory_order_acquire) != head; ++spins) {
+            if (spins < 4096) {
+                __builtin_ia32_pause();
+            } else if (std::chrono::steady_clock::now() > deadline) {
+                return false;
+            } else {
+                std::this_thread::yield();
+            }
+        }
+        return true;
     }
 
     /// Stage A: position after the last committed packet; Reached(position) once B ran it.

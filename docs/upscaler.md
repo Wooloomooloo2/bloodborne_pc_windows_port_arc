@@ -1,5 +1,36 @@
 # Temporal upscaling and frame generation — frame analysis and plan
 
+## Intel XeSS (2026-10-18)
+
+`upscaler=xess` / `BB_UPSCALER=xess` runs Intel XeSS Super Resolution 3.x through its
+Vulkan API (`vk_xess.{h,cpp}`), in the same two places FSR 4 runs: the HDR scene color
+before the combine pass at Native AA (`XESS_INIT_FLAG_ENABLE_AUTOEXPOSURE`), and the
+tonemapped frame on scaled presets (`XESS_INIT_FLAG_LDR_INPUT_COLOR`). Inputs are the
+existing ones: depth, undilated render-size motion vectors (previous - current, pixels) and
+the Halton jitter, whose phase count (8 × ratio²) already meets XeSS's minimum.
+
+- **Setup:** `powershell -ExecutionPolicy Bypass -File tools\fetch_xess_sdk.ps1`, then
+  `build.bat`. The script fetches the official SDK release (checksum-pinned) into
+  `gpu/third_party/xess-sdk/` (gitignored: Intel's license does not allow redistributing its
+  headers here). CMake defines `BBPORT_XESS` only when the headers exist, and
+  `scripts/stage_dlls.py` copies `libxess.dll` and its license into `out/`. `libxess.dll`
+  needs the MSVC 2015-2022 x64 runtime.
+- **Device:** the DLL is loaded at device creation (`BB_XESS_DIR`, then next to `bbport.exe`
+  or `bbgpu`), and its required device extensions and features are merged into the device
+  chain. XeSS may add promoted extension feature structs, which are folded into
+  `VkPhysicalDeviceVulkan12/13Features`. Without the DLL, or on a device that lacks the
+  requirements, `upscaler=xess` falls back to FSR 3.1 before the first frame.
+- **Presets:** the port's scale factors (1.0/1.5/1.7/2.0/3.0) use XeSS's dynamic input
+  resolution, under the quality setting whose range covers the frame's ratio: Native AA,
+  Ultra Quality, Quality, Balanced, Ultra Performance. A change of output size, quality or
+  input type re-initialises XeSS after `Scheduler::Finish`.
+- **Layouts:** XeSS samples its inputs in `SHADER_READ_ONLY_OPTIMAL`. The port keeps them in
+  `GENERAL`, so they are transitioned around the pass and back. The output stays `GENERAL`.
+- **Sharpening:** XeSS has none of its own. The menu's sharpness (0..1) runs the existing
+  extra RCAS pass at that strength.
+- **Checks:** the menu's "XeSS: invert jitter sign" (`xess_invert_jitter`), and toggle
+  1 << 26 as for FSR. With XeSS selected, no reactive mask is made.
+
 ## Native TAA and missing FSR 4 assets (2026-10-01)
 
 `upscaler=taa` / `BB_UPSCALER=taa` is a separate native-resolution temporal AA

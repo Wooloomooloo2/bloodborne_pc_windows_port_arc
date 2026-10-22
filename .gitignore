@@ -32,3 +32,6 @@ test_th.*
 .vscode/
 .idea/
 push_to_github.bat
+
+# Intel XeSS SDK (tools/fetch_xess_sdk.ps1; not redistributable here)
+gpu/third_party/xess-sdk/

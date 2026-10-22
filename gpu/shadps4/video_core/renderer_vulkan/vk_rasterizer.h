@@ -290,6 +290,8 @@ private:
     bool TexturesBindableOnHelper(const Shader::Info& stage, const PreparedStage* prepared);
     static void RunTextureTask(void* rasterizer);
     static void JoinBindHelper(void* rasterizer);
+    /// Scheduler::OwnerHook: a thread other than stage B records while the pipe may be busy.
+    static void OnSchedulerOwnerMiss(void* rasterizer, void* caller);
 
     /// Display pass: counts the frame (BbStats::gpu_frames) and, with BB_BUFFER_STATS, the lag.
     void NoteFrameStart();

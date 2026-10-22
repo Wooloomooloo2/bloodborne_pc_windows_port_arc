@@ -66,6 +66,7 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     if (DrawPipeWanted()) {
         constant_ring = std::make_unique<ConstantRing>(instance, scheduler);
         draw_pipe = std::make_unique<DrawPipe>(&RunDrawPacket, this);
+        scheduler.SetOwnerHook(&OnSchedulerOwnerMiss, this, draw_pipe->StageBThreadIdRef());
     }
     // bbport: this thread joins the texture binding helper before it changes image state.
     runtime.SetImageAccessHook(&JoinBindHelper, this);
@@ -75,7 +76,30 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     });
 }
 
-Rasterizer::~Rasterizer() = default;
+Rasterizer::~Rasterizer() {
+    // The scheduler belongs to the presenter and outlives the draw pipe.
+    scheduler.SetOwnerHook(nullptr, nullptr, nullptr);
+}
+
+void Rasterizer::OnSchedulerOwnerMiss(void* context, void* caller) {
+    auto* self = static_cast<Rasterizer*>(context);
+    if (self->draw_pipe->Idle()) {
+        return; // stage A after a drain, or the pipeline is off: the usual case
+    }
+    // A path that records without DrainDrawPipe() first. On the GPU command thread the drain
+    // makes it safe; elsewhere it is only reported (no drain from other threads).
+    const bool stage_a = self->OnStageA();
+    const bool drained = stage_a && self->draw_pipe->TryDrain(std::chrono::seconds{2});
+    static std::atomic<u32> reports{0};
+    if (reports.fetch_add(1, std::memory_order_relaxed) < 16) {
+        std::printf("Scheduler: recording while the draw pipe is busy: thread %u (%s), "
+                    "caller %p, %s\n",
+                    Scheduler::CurrentThreadId(), stage_a ? "GPU command thread" : "other",
+                    caller,
+                    drained ? "drained first" : stage_a ? "drain timed out" : "not drained");
+        std::fflush(stdout);
+    }
+}
 
 inline const AmdGpu::Regs& Rasterizer::Regs() const {
     return stage_regs ? *stage_regs : liverpool->regs;
@@ -1119,6 +1143,25 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                           u32(bc.color_dst_factor), u32(bc.color_func),
                           u32(regs.depth_control.depth_enable),
                           u32(regs.depth_control.depth_write_enable));
+            FrameCapture::Note(note);
+        }
+        // bbport: BB_CAPTURE_VS=<hex hash>: the fixed-function state of that vertex shader's
+        // draws (finding why a pass costs more than its shaders suggest).
+        static const u64 traced_vs = [] {
+            const char* env = std::getenv("BB_CAPTURE_VS");
+            return env ? std::strtoull(env, nullptr, 16) : 0ull;
+        }();
+        if (traced_vs && vs_info.pgm_hash == traced_vs) {
+            const auto& dc = regs.depth_control;
+            char note[192];
+            std::snprintf(note, sizeof(note),
+                          "\n  vs %08x: %s %u x%u prim %u cull %u%u z test %u write %u func %u "
+                          "blend %u viewport %ux%u",
+                          u32(vs_info.pgm_hash), is_indexed ? "indexed" : "direct", num_indices,
+                          num_instances, u32(regs.primitive_type),
+                          u32(regs.polygon_control.cull_front), u32(regs.polygon_control.cull_back),
+                          u32(dc.depth_enable), u32(dc.depth_write_enable), u32(dc.depth_func),
+                          u32(regs.blend_control[0].enable), state.width, state.height);
             FrameCapture::Note(note);
         }
     }
@@ -3551,11 +3594,23 @@ namespace Vulkan {
 
 void Rasterizer::MarkPass(const GraphicsPipeline* pipeline, const RenderState& state) {
     auto* profiler = GpuProfiler::Get();
-    if (!profiler || !scheduler.WillBeginRendering(state)) {
+    if (!profiler) {
         return;
     }
     const auto& vs = pipeline->GetStage(Shader::SwStage::Vertex);
     const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+    if (!scheduler.WillBeginRendering(state)) {
+        // BB_GPU_PROFILE=2: inside the pass, a segment per run of draws with one shader pair.
+        if (profiler->Level() >= 2) {
+            const u64 ps_hash = ps ? ps->pgm_hash : 0;
+            profiler->MarkDraw(
+                XXH3_64bits_withSeed(&ps_hash, sizeof(ps_hash), vs.pgm_hash ^ 0xD4A7ull), [&] {
+                    return fmt::format("  draws vs {:016x} ps {:016x} ({}x{})", vs.pgm_hash,
+                                       ps_hash, state.width, state.height);
+                });
+        }
+        return;
+    }
     std::array<u64, AmdGpu::NUM_COLOR_BUFFERS + 6> parts{};
     parts[0] = state.width | u64(state.height) << 32;
     parts[1] = vs.pgm_hash;

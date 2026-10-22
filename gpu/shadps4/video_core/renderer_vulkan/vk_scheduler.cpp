@@ -232,6 +232,7 @@ void Scheduler::KickRecording(bool force) {
     if (!recorder_thread.joinable()) {
         return;
     }
+    CheckOwner(__builtin_return_address(0));
     // Callers kick where nobody holds the raw command buffer: deferral resumes.
     direct_mode = false;
     // Batches of tens of KiB keep the queue handoff cheap relative to the work it carries.
@@ -391,6 +392,8 @@ void Scheduler::AllocateWorkerCommandBuffers() {
 }
 
 void Scheduler::SubmitExecution(SubmitInfo& info) {
+    // Before submit_mutex: the draw recording thread may need it to finish what is in flight.
+    CheckOwner(__builtin_return_address(0));
     std::scoped_lock lk{submit_mutex};
     const u64 signal_value = work_semaphore.NextTick();
 
