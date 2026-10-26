@@ -78,6 +78,13 @@
                                     <controls:SegmentedItem Content="Uncapped" />
                                 </controls:Segmented>
                             </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Live resolution change" Style="{StaticResource RowStyle}"
+                                                   Description="Off renders the whole game at the preset's size (fastest)">
+                                <ComboBox Style="{StaticResource RowComboStyle}"
+                                          ItemsSource="{x:Bind ViewModel.LiveResolutionLabels}"
+                                          SelectedIndex="{x:Bind ViewModel.LiveResolutionIndex, Mode=TwoWay}" />
+                            </controls:SettingsCard>
                         </StackPanel>
                     </Border>
 
@@ -117,6 +124,71 @@
                                 <TextBlock Text="{x:Bind ViewModel.RendersText, Mode=OneWay}"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                             </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Sub-pixel jitter" Style="{StaticResource RowStyle}"
+                                                   Description="Lets the upscaler gather detail over several frames"
+                                                   IsEnabled="{x:Bind ViewModel.IsUpscalerOn, Mode=OneWay}">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.Jitter, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Character motion vectors" Style="{StaticResource RowStyle}"
+                                                   Description="Less ghosting on characters and weapons; costs GPU time"
+                                                   IsEnabled="{x:Bind ViewModel.IsUpscalerOn, Mode=OneWay}">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.ObjectMotion, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsExpander Header="Reactive mask"
+                                                       Description="Less trailing behind particles and haze"
+                                                       IsEnabled="{x:Bind ViewModel.IsTemporalReconstruction, Mode=OneWay}"
+                                                       Background="Transparent" BorderThickness="0" CornerRadius="0">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.Reactive, Mode=TwoWay}" />
+                                <controls:SettingsExpander.Items>
+                                    <controls:SettingsCard Header="Scale" IsEnabled="{x:Bind ViewModel.Reactive, Mode=OneWay}">
+                                        <StackPanel Orientation="Horizontal" Spacing="12">
+                                            <Slider Width="150" Minimum="0" Maximum="4" StepFrequency="0.05" VerticalAlignment="Center"
+                                                    Value="{x:Bind ViewModel.ReactiveScale, Mode=TwoWay}" />
+                                            <TextBlock Text="{x:Bind ViewModel.ReactiveScaleText, Mode=OneWay}" Width="32" VerticalAlignment="Center"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Header="Threshold" IsEnabled="{x:Bind ViewModel.Reactive, Mode=OneWay}">
+                                        <StackPanel Orientation="Horizontal" Spacing="12">
+                                            <Slider Width="150" Minimum="0" Maximum="1" StepFrequency="0.01" VerticalAlignment="Center"
+                                                    Value="{x:Bind ViewModel.ReactiveThreshold, Mode=TwoWay}" />
+                                            <TextBlock Text="{x:Bind ViewModel.ReactiveThresholdText, Mode=OneWay}" Width="32" VerticalAlignment="Center"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Header="Maximum" IsEnabled="{x:Bind ViewModel.Reactive, Mode=OneWay}">
+                                        <StackPanel Orientation="Horizontal" Spacing="12">
+                                            <Slider Width="150" Minimum="0" Maximum="1" StepFrequency="0.01" VerticalAlignment="Center"
+                                                    Value="{x:Bind ViewModel.ReactiveMax, Mode=TwoWay}" />
+                                            <TextBlock Text="{x:Bind ViewModel.ReactiveMaxText, Mode=OneWay}" Width="32" VerticalAlignment="Center"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                    </controls:SettingsCard>
+                                </controls:SettingsExpander.Items>
+                            </controls:SettingsExpander>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsExpander Header="Upscaler checks"
+                                                       Description="Diagnostic switches for comparing image quality"
+                                                       IsEnabled="{x:Bind ViewModel.IsTemporalReconstruction, Mode=OneWay}"
+                                                       Background="Transparent" BorderThickness="0" CornerRadius="0,0,8,8">
+                                <controls:SettingsExpander.Items>
+                                    <controls:SettingsCard Header="XeSS: invert jitter sign"
+                                                           IsEnabled="{x:Bind ViewModel.IsXess, Mode=OneWay}">
+                                        <ToggleSwitch IsOn="{x:Bind ViewModel.XessInvertJitter, Mode=TwoWay}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Header="FSR 4: auto exposure"
+                                                           IsEnabled="{x:Bind ViewModel.IsFsr4, Mode=OneWay}">
+                                        <ToggleSwitch IsOn="{x:Bind ViewModel.Fsr4AutoExposure, Mode=TwoWay}" />
+                                    </controls:SettingsCard>
+                                    <controls:SettingsCard Header="FSR 4: invert jitter sign"
+                                                           IsEnabled="{x:Bind ViewModel.IsFsr4, Mode=OneWay}">
+                                        <ToggleSwitch IsOn="{x:Bind ViewModel.Fsr4InvertJitter, Mode=TwoWay}" />
+                                    </controls:SettingsCard>
+                                </controls:SettingsExpander.Items>
+                            </controls:SettingsExpander>
                         </StackPanel>
                     </Border>
 
@@ -143,9 +215,6 @@
                                                        Description="Feature switches, community patches"
                                                        Background="Transparent" BorderThickness="0" CornerRadius="0,0,8,8">
                                 <controls:SettingsExpander.Items>
-                                    <controls:SettingsCard Header="Object motion vectors">
-                                        <ToggleSwitch IsOn="{x:Bind ViewModel.ObjectMotion, Mode=TwoWay}" />
-                                    </controls:SettingsCard>
                                     <controls:SettingsCard Header="In-game overlay menu" Description="Insert / L3+R3">
                                         <ToggleSwitch IsOn="{x:Bind ViewModel.Overlay, Mode=TwoWay}" />
                                     </controls:SettingsCard>
@@ -195,6 +264,12 @@
                     <TextBlock Text="Effects" Style="{StaticResource SectionHeaderStyle}" />
                     <Border Style="{StaticResource GroupStyle}">
                         <StackPanel>
+                            <controls:SettingsCard Header="Model detail" Style="{StaticResource RowStyle}">
+                                <ComboBox Style="{StaticResource RowComboStyle}"
+                                          ItemsSource="{x:Bind ViewModel.ModelLodLabels}"
+                                          SelectedIndex="{x:Bind ViewModel.ModelLodIndex, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
                             <controls:SettingsCard Header="Depth of field" Style="{StaticResource RowStyle}">
                                 <ToggleSwitch IsOn="{x:Bind ViewModel.Dof, Mode=TwoWay}" />
                             </controls:SettingsCard>
@@ -230,6 +305,16 @@
                             <Rectangle Style="{StaticResource RowDividerStyle}" />
                             <controls:SettingsCard Header="Skip intro videos" Style="{StaticResource RowStyle}">
                                 <ToggleSwitch IsOn="{x:Bind ViewModel.SkipIntro, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Free camera" Style="{StaticResource RowStyle}"
+                                                   Description="Hold Cross and press L3 (keyboard: Space + Z)">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.DebugCamera, Mode=TwoWay}" />
+                            </controls:SettingsCard>
+                            <Rectangle Style="{StaticResource RowDividerStyle}" />
+                            <controls:SettingsCard Header="Debug menu" Style="{StaticResource RowStyle}"
+                                                   Description="Left touchpad / Tab; needs the Nexus #253 fonts">
+                                <ToggleSwitch IsOn="{x:Bind ViewModel.DebugMenu, Mode=TwoWay}" />
                             </controls:SettingsCard>
                         </StackPanel>
                     </Border>

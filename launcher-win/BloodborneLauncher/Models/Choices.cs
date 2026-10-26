@@ -33,20 +33,38 @@ internal static class Choices
     /// <summary>Segmented order; BB_FPS values.</summary>
     public static readonly string[] Fps = ["30", "60", "90", "uncap"];
 
-    /// <summary>bbport.ini upscaler values in ComboBox order ("fsr411" is shown as FSR 4).</summary>
-    public static readonly string[] Upscalers = ["off", "fsr3", "fsr4", "xess", "taa"];
-    public static readonly string[] UpscalerLabels = ["Off", "FSR 3.1", "FSR 4", "XeSS", "TAA"];
+    /// <summary>bbport.ini upscaler values in ComboBox order (the in-game menu's list).</summary>
+    public static readonly string[] Upscalers = ["off", "fsr3", "fsr4", "fsr411", "xess", "taa"];
+    public static readonly string[] UpscalerLabels =
+        ["Off", "FSR 3.1", "FSR 4 (INT8)", "FSR 4.1.1 (INT8)", "XeSS (Intel)", "TAA (native anti-aliasing)"];
     public const int UpscalerOff = 0;
-    public const int UpscalerTaa = 4;
+    public const int UpscalerXess = 4;
+    public const int UpscalerTaa = 5;
 
     public static int UpscalerIndex(string? value) => value switch
     {
         "fsr3" => 1,
-        "fsr4" or "fsr411" => 2,
-        "xess" => 3,
-        "taa" => 4,
+        "fsr4" => 2,
+        "fsr411" => 3,
+        "xess" => 4,
+        "taa" => 5,
         _ => 0,
     };
+
+    /// <summary>bbport.ini live_resolution (BbSettings: auto, 0, 1).</summary>
+    public static readonly string[] LiveResolution = ["0", "auto", "1"];
+    public static readonly string[] LiveResolutionLabels = ["Off (fastest, restart to change)", "Auto (by GPU)", "On (change in game)"];
+
+    public static int LiveResolutionIndex(string? value) => value switch
+    {
+        "auto" => 1,
+        "1" => 2,
+        _ => 0,
+    };
+
+    /// <summary>bbport.ini model_lod (-2 highest .. 2 lowest, 0 the game's).</summary>
+    public static readonly int[] ModelLod = [-2, 0, 1, 2];
+    public static readonly string[] ModelLodLabels = ["Maximum", "Game default", "Lower", "Minimum"];
 
     public static readonly string[] Presets = ["Native AA", "Quality", "Balanced", "Performance", "Ultra Performance"];
     private static readonly double[] PresetScales = [1.0, 1.5, 1.7, 2.0, 3.0];

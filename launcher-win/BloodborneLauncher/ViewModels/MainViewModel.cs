@@ -51,7 +51,6 @@ internal sealed partial class MainViewModel : ObservableObject
         FpsIndex = Math.Max(0, Array.IndexOf(Choices.Fps, _s.Fps));
         AnisoIndex = Math.Max(0, Array.IndexOf(Choices.AnisoLabels, _s.Aniso));
         FrameStats = _s.FrameStats;
-        ObjectMotion = _s.FeatObjectMotion;
         Overlay = _s.FeatOverlay;
         FpsPatch = _s.FeatFpsPatch;
         Mods = _s.Mods;
@@ -121,15 +120,27 @@ internal sealed partial class MainViewModel : ObservableObject
             if (value != Choices.UpscalerOff)
             {
                 // Temporal upscalers need the sub-pixel camera jitter.
+                Jitter = true;
                 WriteIni("jitter", "1");
             }
             SaveSetting(() => _s.FeatUpscaler = value != Choices.UpscalerOff);
         }
         OnPropertyChanged(nameof(IsUpscalerOn));
         OnPropertyChanged(nameof(IsPresetEnabled));
+        OnPropertyChanged(nameof(IsTemporalReconstruction));
+        OnPropertyChanged(nameof(IsXess));
+        OnPropertyChanged(nameof(IsFsr4));
         OnPropertyChanged(nameof(RendersText));
         OnPropertyChanged(nameof(PresetDescription));
     }
+
+    /// <summary>The upscalers that reconstruct from several frames (not TAA, not off): the
+    /// reactive mask and the provider checks apply to them.</summary>
+    public bool IsTemporalReconstruction => UpscalerIndex is not Choices.UpscalerOff and not Choices.UpscalerTaa;
+
+    public bool IsXess => UpscalerIndex == Choices.UpscalerXess;
+
+    public bool IsFsr4 => UpscalerIndex is 2 or 3;
 
     public bool IsUpscalerOn => UpscalerIndex != Choices.UpscalerOff;
 
@@ -182,6 +193,101 @@ internal sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    // In-game menu settings (bbport.ini, BbSettings): the same keys the overlay writes.
+
+    [ObservableProperty]
+    public partial bool Jitter { get; set; } = true;
+
+    partial void OnJitterChanged(bool value) => WriteIni("jitter", value);
+
+    [ObservableProperty]
+    public partial bool ObjectMotion { get; set; }
+
+    partial void OnObjectMotionChanged(bool value) => WriteIni("object_motion", value);
+
+    [ObservableProperty]
+    public partial bool Reactive { get; set; }
+
+    partial void OnReactiveChanged(bool value) => WriteIni("reactive", value);
+
+    [ObservableProperty]
+    public partial double ReactiveScale { get; set; } = 1.0;
+
+    partial void OnReactiveScaleChanged(double value)
+    {
+        WriteIni("reactive_scale", Fixed(Math.Clamp(value, 0, 4)));
+        OnPropertyChanged(nameof(ReactiveScaleText));
+    }
+
+    public string ReactiveScaleText => Fixed(ReactiveScale);
+
+    [ObservableProperty]
+    public partial double ReactiveThreshold { get; set; } = 0.2;
+
+    partial void OnReactiveThresholdChanged(double value)
+    {
+        WriteIni("reactive_threshold", Fixed(Math.Clamp(value, 0, 1)));
+        OnPropertyChanged(nameof(ReactiveThresholdText));
+    }
+
+    public string ReactiveThresholdText => Fixed(ReactiveThreshold);
+
+    [ObservableProperty]
+    public partial double ReactiveMax { get; set; } = 0.9;
+
+    partial void OnReactiveMaxChanged(double value)
+    {
+        WriteIni("reactive_max", Fixed(Math.Clamp(value, 0, 1)));
+        OnPropertyChanged(nameof(ReactiveMaxText));
+    }
+
+    public string ReactiveMaxText => Fixed(ReactiveMax);
+
+    [ObservableProperty]
+    public partial bool XessInvertJitter { get; set; }
+
+    partial void OnXessInvertJitterChanged(bool value) => WriteIni("xess_invert_jitter", value);
+
+    [ObservableProperty]
+    public partial bool Fsr4AutoExposure { get; set; } = true;
+
+    partial void OnFsr4AutoExposureChanged(bool value) => WriteIni("fsr4_auto_exposure", value);
+
+    [ObservableProperty]
+    public partial bool Fsr4InvertJitter { get; set; }
+
+    partial void OnFsr4InvertJitterChanged(bool value) => WriteIni("fsr4_invert_jitter", value);
+
+#pragma warning disable CA1822 // x:Bind binds to instance members.
+    public string[] LiveResolutionLabels => Choices.LiveResolutionLabels;
+    public string[] ModelLodLabels => Choices.ModelLodLabels;
+#pragma warning restore CA1822
+
+    [ObservableProperty]
+    public partial int LiveResolutionIndex { get; set; }
+
+    partial void OnLiveResolutionIndexChanged(int value)
+    {
+        if (value >= 0)
+        {
+            WriteIni("live_resolution", Choices.LiveResolution[Math.Clamp(value, 0, Choices.LiveResolution.Length - 1)]);
+        }
+    }
+
+    [ObservableProperty]
+    public partial int ModelLodIndex { get; set; } = 1;
+
+    partial void OnModelLodIndexChanged(int value)
+    {
+        if (value >= 0)
+        {
+            WriteIni("model_lod", Choices.ModelLod[Math.Clamp(value, 0, Choices.ModelLod.Length - 1)]
+                .ToString(CultureInfo.InvariantCulture));
+        }
+    }
+
+    private static string Fixed(double v) => v.ToString("0.00", CultureInfo.InvariantCulture);
+
     // ------------------------------------------------------------ Advanced
 
     [ObservableProperty]
@@ -201,11 +307,6 @@ internal sealed partial class MainViewModel : ObservableObject
     public partial bool FrameStats { get; set; }
 
     partial void OnFrameStatsChanged(bool value) => SaveSetting(() => _s.FrameStats = value);
-
-    [ObservableProperty]
-    public partial bool ObjectMotion { get; set; }
-
-    partial void OnObjectMotionChanged(bool value) => SaveFeature("Object motion vectors", value, () => _s.FeatObjectMotion = value);
 
     [ObservableProperty]
     public partial bool Overlay { get; set; }
@@ -324,6 +425,12 @@ internal sealed partial class MainViewModel : ObservableObject
 
     [ObservableProperty] public partial bool SkipIntro { get; set; }
     partial void OnSkipIntroChanged(bool value) => WriteIni("skip_intro", value);
+
+    [ObservableProperty] public partial bool DebugCamera { get; set; }
+    partial void OnDebugCameraChanged(bool value) => WriteIni("debug_camera", value);
+
+    [ObservableProperty] public partial bool DebugMenu { get; set; }
+    partial void OnDebugMenuChanged(bool value) => WriteIni("debug_menu", value);
 
     // ------------------------------------------------------------ Locations
 
@@ -505,6 +612,20 @@ internal sealed partial class MainViewModel : ObservableObject
             GameAa = Flag("effect_game_aa", true);
             ShowFps = Flag("show_fps", false);
             SkipIntro = Flag("skip_intro", false);
+            DebugCamera = Flag("debug_camera", false);
+            DebugMenu = Flag("debug_menu", false);
+            Jitter = Flag("jitter", false);
+            ObjectMotion = Flag("object_motion", false);
+            Reactive = Flag("reactive", false);
+            ReactiveScale = Math.Clamp(Double(_ini.Get("reactive_scale"), 1.0), 0, 4);
+            ReactiveThreshold = Math.Clamp(Double(_ini.Get("reactive_threshold"), 0.2), 0, 1);
+            ReactiveMax = Math.Clamp(Double(_ini.Get("reactive_max"), 0.9), 0, 1);
+            XessInvertJitter = Flag("xess_invert_jitter", false);
+            Fsr4AutoExposure = Flag("fsr4_auto_exposure", true);
+            Fsr4InvertJitter = Flag("fsr4_invert_jitter", false);
+            LiveResolutionIndex = Choices.LiveResolutionIndex(_ini.Get("live_resolution"));
+            var lod = Array.IndexOf(Choices.ModelLod, Math.Clamp(Int(_ini.Get("model_lod"), 0), -2, 2));
+            ModelLodIndex = lod >= 0 ? lod : 1;
         }
         finally
         {
@@ -603,7 +724,8 @@ internal sealed partial class MainViewModel : ObservableObject
         env["BB_FPS"] = _s.Fps;
         env["BB_MODS_ENABLED"] = _s.Mods ? "1" : "0";
         Feature(IsUpscalerOn, "BB_UPSCALER", "off");
-        Feature(_s.FeatObjectMotion, "BB_OBJECT_MOTION", "0");
+        // Object motion is a bbport.ini setting now (the launcher's switch writes it).
+        env.Remove("BB_OBJECT_MOTION");
         Feature(_s.FeatOverlay, "BB_OVERLAY", "0");
         Feature(_s.FeatFpsPatch, "BB_FPS_PATCH", "0");
         env.Remove("BB_RENDER_RES");
@@ -694,7 +816,7 @@ internal sealed partial class MainViewModel : ObservableObject
         Log.Log(new string('=', 50));
         Log.Log($"Starting Bloodborne from: {gameDir}   [{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)}]");
         Log.Log($"FPS: {_s.Fps} | Res: {resChoice} | Mods: {env["BB_MODS_ENABLED"]}");
-        Log.Log($"Features: FSR={OnOff(fsr)}, ObjectMotion={OnOff(_s.FeatObjectMotion)}, Overlay={OnOff(_s.FeatOverlay)}, " +
+        Log.Log($"Features: FSR={OnOff(fsr)}, ObjectMotion={OnOff(ObjectMotion)}, Overlay={OnOff(_s.FeatOverlay)}, " +
                 $"FPSPatch={OnOff(_s.FeatFpsPatch)}, Mods={OnOff(_s.Mods)}, ResScaling={OnOff(_s.FeatResScaling)}, " +
                 $"Tracing={OnOff(_s.FeatTracing)}, Watchdog={OnOff(_s.FeatWatchdog)}, DrawPrep={OnOff(_s.FeatDrawPrep)}");
         Log.Log($"XML Patches ({patches.Count} active): {(patches.Count > 0 ? string.Join(", ", patches) : "None")}");
@@ -783,7 +905,7 @@ internal sealed partial class MainViewModel : ObservableObject
         {
             Log.Log($"[WARNING] Feature switch discrepancy: Upscaler is toggled OFF but startup reported: {line.Trim()}");
         }
-        if (!_s.FeatObjectMotion && line.Contains("Object motion: on", StringComparison.Ordinal))
+        if (!ObjectMotion && line.Contains("Object motion: on", StringComparison.Ordinal))
         {
             Log.Log($"[WARNING] Feature switch discrepancy: Object motion is toggled OFF but startup reported: {line.Trim()}");
         }

@@ -4,12 +4,51 @@
 
 This project is a Windows adaptation of the original Linux port (`bbport` by `deadinside28`). It replaces the Linux-specific kernel, memory mapping, and POSIX threading implementation with a native Win32 runtime, allowing the game to run directly on Windows with Vulkan.
 
-The game's x86-64 code executes natively on your CPU without general emulation. System library calls are handled by a dedicated lightweight runtime, and GPU commands are translated directly to Vulkan with support for AMD FSR 3.1 and FSR 4 temporal upscaling.
+The game's x86-64 code executes natively on your CPU without general emulation. System library calls are handled by a dedicated lightweight runtime, and GPU commands are translated directly to Vulkan with support for AMD FSR 3.1, FSR 4 and Intel XeSS temporal upscaling.
 
 > **No game files or copyrighted assets are included.** You must provide your own decrypted dump of Bloodborne (CUSA03173, version 1.09).
 > This project is not affiliated with Sony Interactive Entertainment, FromSoftware, or AMD.
 
 **Status: Playable on Windows.** The game boots, loads saves, and runs with audio, gamepad support, and state persistence.
+
+---
+
+## Intel Arc edition (this fork)
+
+This fork tunes the Windows port for Intel Arc, developed and measured on a Core Ultra X7 358H
+with the Arc B390 iGPU. The aim is the smoothest, most stable Bloodborne on that class of
+hardware. Native 1080p comes first; Intel's upscaling and frame generation come on top.
+Measurements and reasoning are in [docs/intel_opt.md](docs/intel_opt.md) and
+[docs/xess.md](docs/xess.md).
+
+- **Intel XeSS Super Resolution** (the XeSS 2 upscaler, SDK 3.0.2) through its Vulkan API.
+  Fetch the SDK with `powershell -ExecutionPolicy Bypass -File tools\fetch_xess_sdk.ps1`, then
+  run `build.bat`. XeSS Quality at 1080p renders the game at 1280x720 and upscales it: 57 FPS
+  against 47 native in a heavy area on the B390.
+- **Upscaled presets really render smaller on Windows.** `run.bat`'s scene-size query had never
+  worked there (cmd quote stripping), so every preset ran on a slower path that kept the
+  game's buffers at full size.
+- **Native WinUI 3 launcher** with every option from the in-game menu: upscaler and preset,
+  sharpening, jitter, character motion vectors, reactive mask, live resolution, model detail,
+  effects, free camera and debug menu. Most of these need a restart anyway, so they belong
+  in the launcher.
+- **Stability:**
+  - fixed heap corruption in the runtime's low-memory allocator (a likely cause of the empty
+    workshop Repair menu; it also leaked memory);
+  - fixed a crash on an SNORM_NZ texture format;
+  - fixed the HUD item icon missing at outputs other than 1080p.
+- **Smoother area loads:** sparse buffer memory is pooled in 32 MiB chunks instead of one
+  driver allocation per range. The worst load hitch went from about 1.1 s to about 0.3 s.
+- **Cheaper character motion vectors:** plain stores instead of per-vertex atomics, and one
+  attachment set for the G-buffer pass. The overhead is about half of what it was.
+- **Profiling tools:**
+  - per-pass GPU timings and pipeline statistics (`BB_GPU_PROFILE=1..3`);
+  - render-pass split counter (`BB_PASS_SPLITS=1`);
+  - stall breakdowns on Windows (`BB_FRAME_STATS=1`);
+  - screenshot trigger (`BB_SCREENSHOT_TRIGGER`).
+
+Planned: XeSS frame generation and Xe Low Latency. Intel ships them for D3D12 only, so they
+need a D3D12 presentation path next to the Vulkan renderer.
 
 ---
 
@@ -63,8 +102,8 @@ This repository adapts the original Linux codebase specifically for Windows syst
 
 Clone the repository recursively:
 ```cmd
-git clone --recursive https://github.com/Mrsuss60/bloodborne_pc_windows_port.git
-cd bloodborne_pc_windows_port
+git clone --recursive https://github.com/Wooloomooloo2/bloodborne_pc_windows_port_arc.git
+cd bloodborne_pc_windows_port_arc
 ```
 
 > **Windows Path Length Warning**: FidelityFX contains deeply nested shader files that can exceed Windows' default 260-character path limit (`MAX_PATH`). If your project folder is located deep in your directory structure, either enable long paths in Git via `git config --system core.longpaths true` (or clone close to a drive root like `C:\bbport`), or set up a mapped drive with `subst X: .`.
@@ -94,7 +133,7 @@ A native Windows launcher replaces the Python one when it is built. It needs the
 ```cmd
 launcher-win\build-launcher.bat
 ```
-This publishes `out\launcher\Bloodborne.exe`; `launch_gui.bat` then starts it instead of `launcher.py` (which stays as the fallback). The native launcher owns `bbport.ini` for the display, upscaler and effect settings (the in-game menu writes the same file) and keeps the rest in `launcher_settings.json`. Untick **Show launcher every time** to have `Bloodborne.exe` start the game straight away; hold **Shift** while starting it to see the launcher again. The **Log** link in the footer shows the live output; the full log is `launcher.log`.
+This publishes `out\launcher\Bloodborne.exe`; `launch_gui.bat` then starts it instead of `launcher.py` (which stays as the fallback). The native launcher owns `bbport.ini` for every in-game menu setting (display, upscaler, sharpening, jitter, character motion vectors, reactive mask, live resolution, model detail and effects; the in-game menu writes the same file) and keeps the rest in `launcher_settings.json`. For XeSS at 1080p, choose **XeSS** and **Quality**: the game log then shows `Output 1920x1080: scene 1280x720`. Untick **Show launcher every time** to have `Bloodborne.exe` start the game straight away; hold **Shift** while starting it to see the launcher again. The **Log** link in the footer shows the live output; the full log is `launcher.log`.
 
 #### Option B: Using the Command Line
 Run `run.bat` pointing to your game directory:
@@ -128,7 +167,8 @@ Save files and shader caches are stored in `user/`. Settings are saved to `bbpor
 | `build.bat` | Windows build script |
 | `run.bat` | Direct execution batch script |
 | `tools/` | Developer utilities and patch extraction scripts |
-| `docs/` | Architecture notes, upscaler documentation, and change logs |
+| `launcher-win/` | Native WinUI 3 launcher (`build-launcher.bat`) |
+| `docs/` | Architecture notes, upscaler documentation (`upscaler.md`, `xess.md`), Intel Arc notes (`intel_opt.md`), and change logs |
 
 ---
 
@@ -141,6 +181,8 @@ Special thanks to the original creators and open source projects that made this 
 - **deadinside28**: Creator of the original Linux port (`bbport`), pioneering the flat memory image architecture, custom Vulkan two-stage pipeline, and synthetic motion vector generation.
 - **shadPS4 Team**: Base Vulkan video core and shader recompiler.
 - **FireBurn**: FSR-Vulkan runtime and temporal upscaling backend.
+- **Mrsuss60**: The Windows port this fork builds on.
+- **Intel**: XeSS SDK (fetched at build time under Intel's license; not redistributed here).
 - **Thealexbarney**: LibAtrac9 audio decoding library.
 - **ocornut**: Dear ImGui library for the in-game settings overlay.
 - **Community Patch Authors**: Kyo, Lance McDonald, illusion, emoose, auser1337, and contributors for the 60 FPS, camera, and engine patches.
