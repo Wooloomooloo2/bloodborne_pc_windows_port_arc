@@ -5,6 +5,8 @@
 // frames later and printed every 5 s: GPU ms per frame by label.
 // bbport: BB_GPU_PROFILE=2 also writes timestamps inside render passes, at every change of the
 // draws' shader pair (MarkDraw), to split a pass's time by the shaders drawing in it.
+// BB_GPU_PROFILE=3 adds pipeline statistics per draw (BeginDrawStats/EndDrawStats): vertex and
+// fragment shader invocations and primitives, summed by shader pair (vertex vs pixel work).
 
 #pragma once
 
@@ -59,6 +61,22 @@ public:
         return level;
     }
 
+    /// BB_GPU_PROFILE=3: a statistics query for the next draw of shader pair `key`, or ~0u.
+    template <typename Describe>
+    u32 AllocDrawStats(u64 key, Describe&& describe) {
+        if (level < 3 || !stats_pool || stats_used[slice] >= SliceStats) {
+            return ~0u;
+        }
+        if (!described.contains(key)) {
+            described.emplace(key, describe());
+        }
+        stats_keys[slice].push_back(key);
+        return slice * SliceStats + stats_used[slice]++;
+    }
+    [[nodiscard]] vk::QueryPool StatsPool() const noexcept {
+        return *stats_pool;
+    }
+
     /// Continues the segment of `key` (a label seen before) where a nested one ends.
     void Resume(u64 key) {
         WriteTimestamp(key);
@@ -81,6 +99,9 @@ private:
 
     static constexpr u32 NumSlices = 4;
     static constexpr u32 SliceQueries = 4096;
+    static constexpr u32 SliceStats = 2048;
+    /// Pipeline statistics per query, in the order Vulkan returns them (bit order).
+    static constexpr u32 NumStats = 6;
     static inline GpuProfiler* instance_ptr = nullptr;
 
     vk::Device device;
@@ -100,6 +121,14 @@ private:
     std::unordered_map<u64, Total> totals;
     u64 frames = 0;
     u64 current = 0;
+    vk::UniqueQueryPool stats_pool;
+    std::array<std::vector<u64>, NumSlices> stats_keys;
+    std::array<u32, NumSlices> stats_used{};
+    struct Stats {
+        std::array<double, NumStats> sum{};
+        u64 draws = 0;
+    };
+    std::unordered_map<u64, Stats> stats;
     std::chrono::steady_clock::time_point window = std::chrono::steady_clock::now();
 };
 

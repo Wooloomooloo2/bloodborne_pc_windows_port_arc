@@ -45,6 +45,13 @@ public:
     /// Rendering of a motion pipeline: the motion attachment (render-target size).
     void Attach(RenderState& state, u32 width, u32 height);
 
+    /// bbport: G-buffer pipelines that do not write motion still declare its attachment
+    /// (format undefined, VK_EXT_dynamic_rendering_unused_attachments), and the rasterizer
+    /// binds it for them too, so motion and other draws share one pass. Without this the
+    /// attachment set changed between them and the G-buffer pass was split each time.
+    /// BB_MOTION_UNIFORM=0 restores the old behaviour.
+    static bool UniformAttachment(const Instance& instance);
+
     /// Start of a frame (display pass).
     void OnFrameStart();
     void InvalidateHistory() { history.NextFrame(); history.NextFrame(); }

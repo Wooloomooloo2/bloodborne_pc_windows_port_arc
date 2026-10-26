@@ -61,6 +61,7 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
         return;
     }
     EndRendering();
+    NoteSplit(new_state);
     is_rendering = true;
     render_state = new_state;
 
@@ -131,7 +132,72 @@ void Scheduler::EndRendering() {
         return;
     }
     is_rendering = false;
+    ended_state = render_state;
+    ended_by = __builtin_return_address(0);
+    ended_hint = split_hint;
+    split_hint = nullptr;
     Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endRendering(); });
+}
+
+void Scheduler::NoteSplit(const RenderState& new_state) {
+    static const bool enabled = [] {
+        const char* env = std::getenv("BB_PASS_SPLITS");
+        return env && env[0] == '1';
+    }();
+    if (!enabled) {
+        return;
+    }
+    // A split: the same targets again (load ops may differ: a clear only happens once).
+    bool same = new_state.width == ended_state.width && new_state.height == ended_state.height &&
+                new_state.num_color_attachments == ended_state.num_color_attachments &&
+                new_state.depth_stencil_attachment.image_view ==
+                    ended_state.depth_stencil_attachment.image_view;
+    for (u32 i = 0; same && i < new_state.num_color_attachments; ++i) {
+        same = new_state.color_attachments[i].image_view ==
+               ended_state.color_attachments[i].image_view;
+    }
+    static std::unordered_map<u64, std::array<u64, 2>> callers; // splits, attachments reloaded
+    static std::unordered_map<u64, std::pair<void*, void*>> caller_names;
+    static u64 splits = 0, begins = 0, reloads = 0;
+    static auto window = std::chrono::steady_clock::now();
+    static u64 window_frames = 0;
+    ++begins;
+    if (same && (new_state.num_color_attachments || new_state.depth_stencil_attachment.image_view)) {
+        const u64 attachments = new_state.num_color_attachments +
+                                (new_state.depth_stencil_attachment.image_view ? 1 : 0);
+        ++splits;
+        reloads += attachments;
+        const u64 key = reinterpret_cast<u64>(ended_by) * 31 ^ reinterpret_cast<u64>(ended_hint);
+        caller_names[key] = {ended_by, ended_hint};
+        auto& c = callers[key];
+        ++c[0];
+        c[1] += attachments;
+    }
+    const u64 frames = BbStats::gpu_frames.load(std::memory_order_relaxed);
+    const auto now = std::chrono::steady_clock::now();
+    if (now - window < std::chrono::seconds(5)) {
+        return;
+    }
+    const double f = double(std::max<u64>(1, frames - window_frames));
+    std::printf("Pass splits: %.1f/frame of %.1f render pass begins, %.1f attachments "
+                "reloaded/frame\n",
+                splits / f, begins / f, reloads / f);
+    std::vector<std::pair<std::array<u64, 2>, u64>> top;
+    for (const auto& [key, c] : callers) {
+        top.emplace_back(c, key);
+    }
+    std::ranges::sort(top, [](const auto& a, const auto& b) { return a.first[1] > b.first[1]; });
+    for (size_t i = 0; i < std::min<size_t>(top.size(), 8); ++i) {
+        const auto [by, hint] = caller_names[top[i].second];
+        std::printf("  %.1f splits/frame (%.1f attachments) ended by %p, called from %p\n",
+                    top[i].first[0] / f, top[i].first[1] / f, by, hint);
+    }
+    std::fflush(stdout);
+    callers.clear();
+    caller_names.clear();
+    splits = begins = reloads = 0;
+    window = now;
+    window_frames = frames;
 }
 
 void Scheduler::TraceDirectRecording(void* caller) {

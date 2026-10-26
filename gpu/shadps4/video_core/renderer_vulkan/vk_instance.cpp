@@ -221,7 +221,8 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR,
         vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT, vk::PhysicalDeviceShaderClockFeaturesKHR,
         vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR,
-        vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE>();
+        vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE,
+        vk::PhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>();
     features = feature_chain.get().features;
 
     const vk::StructureChain properties_chain = physical_device.getProperties2<
@@ -286,6 +287,13 @@ bool Instance::CreateDevice() {
             // We want both extensions so remove the first if the second isn't available
             enabled_extensions.pop_back();
         }
+    }
+    // bbport: lets the G-buffer pass keep the object motion attachment bound for pipelines that
+    // do not write it (no pass split between motion and other draws).
+    if (feature_chain.get<vk::PhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>()
+            .dynamicRenderingUnusedAttachments) {
+        unused_attachments =
+            add_extension(VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME);
     }
     depth_range_unrestricted = add_extension(VK_EXT_DEPTH_RANGE_UNRESTRICTED_EXTENSION_NAME);
     dynamic_state_3 = add_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME);
@@ -431,6 +439,8 @@ bool Instance::CreateDevice() {
                 .wideLines = features.wideLines,
                 .multiViewport = features.multiViewport,
                 .samplerAnisotropy = features.samplerAnisotropy,
+                // bbport: BB_GPU_PROFILE=3 counts shader invocations per draw (vk_gpu_profiler).
+                .pipelineStatisticsQuery = features.pipelineStatisticsQuery,
                 .vertexPipelineStoresAndAtomics = features.vertexPipelineStoresAndAtomics,
                 .fragmentStoresAndAtomics = features.fragmentStoresAndAtomics,
                 .shaderImageGatherExtended = features.shaderImageGatherExtended,
@@ -525,6 +535,9 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT{
             .attachmentFeedbackLoopDynamicState = true,
         },
+        vk::PhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT{
+            .dynamicRenderingUnusedAttachments = true,
+        },
         vk::PhysicalDeviceShaderAtomicFloat2FeaturesEXT{
             .shaderBufferFloat32AtomicMinMax =
                 shader_atomic_float2_features.shaderBufferFloat32AtomicMinMax,
@@ -590,6 +603,9 @@ bool Instance::CreateDevice() {
     }
     if (!maintenance_8) {
         device_chain.unlink<vk::PhysicalDeviceMaintenance8FeaturesKHR>();
+    }
+    if (!unused_attachments) {
+        device_chain.unlink<vk::PhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>();
     }
     if (!attachment_feedback_loop) {
         device_chain.unlink<vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT>();

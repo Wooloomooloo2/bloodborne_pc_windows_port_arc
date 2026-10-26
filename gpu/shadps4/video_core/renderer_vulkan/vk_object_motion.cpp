@@ -196,6 +196,14 @@ void ObjectMotion::EnsureImage(u32 width, u32 height) {
     written = false;
 }
 
+bool ObjectMotion::UniformAttachment(const Instance& instance) {
+    static const bool wanted = [] {
+        const char* env = std::getenv("BB_MOTION_UNIFORM");
+        return !env || env[0] != '0';
+    }();
+    return wanted && instance.IsUnusedAttachmentsSupported();
+}
+
 void ObjectMotion::Attach(RenderState& state, u32 width, u32 height) {
     constexpr u32 slot = Shader::MotionVectors::Output;
     EnsureImage(width, height);

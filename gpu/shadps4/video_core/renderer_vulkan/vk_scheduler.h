@@ -943,6 +943,17 @@ private:
     std::jthread priority_pending_ops_thread;
     RenderState render_state;
     bool is_rendering = false;
+    /// bbport: BB_PASS_SPLITS=1: the last pass ended and its ender, to count restarts of the
+    /// same targets (each one stores and reloads every attachment).
+    RenderState ended_state{};
+    void* ended_by = nullptr;
+    void* ended_hint = nullptr;
+public:
+    /// BB_PASS_SPLITS: set before EndRendering by wrappers (Runtime::CopyBuffer, ...) to the
+    /// address of their own caller, which the split report prints next to the wrapper.
+    void* split_hint = nullptr;
+private:
+    void NoteSplit(const RenderState& new_state);
     // bbport: threaded recording
     std::unique_ptr<RecordChunk> record_chunk;
     std::vector<std::unique_ptr<RecordChunk>> full_chunks;

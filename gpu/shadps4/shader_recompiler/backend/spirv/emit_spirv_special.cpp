@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdlib>
 #include "shader_recompiler/backend/spirv/emit_spirv_instructions.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
 #include "shader_recompiler/ir/debug_print.h"
@@ -120,15 +121,28 @@ static void EmitVertexMotion(EmitContext& ctx) {
     ctx.AddLabel(store_label);
     const Id store_address = address(MotionVectors::positions_address,
                                      ctx.OpIAdd(u32_type, store_base, slot), 16);
-    // Indexed draws may invoke the same vertex more than once. Atomic component stores
-    // avoid write/write races; all these invocations produce the same clip position.
-    const Id scalar_ptr = ctx.TypePointer(spv::StorageClass::PhysicalStorageBuffer, u32_type);
-    const Id scope = ctx.ConstU32(static_cast<u32>(spv::Scope::Device));
-    for (u32 i = 0; i < 4; ++i) {
-        const Id ptr = ctx.OpConvertUToPtr(scalar_ptr,
-            ctx.OpIAdd(ctx.U64, store_address, ctx.Constant(ctx.U64, u64(i * 4))));
-        const Id bits = ctx.OpBitcast(u32_type, ctx.OpCompositeExtract(ctx.F32[1], position, i));
-        ctx.OpAtomicExchange(u32_type, ptr, scope, ctx.u32_zero_value, bits);
+    // Indexed draws may invoke the same vertex more than once; all these invocations write
+    // the same clip position. bbport: one aligned 16-byte store by default. Four device-scope
+    // atomic exchanges per vertex (BB_MOTION_ATOMIC=1, the old code) made the G-buffer about
+    // 29 ms slower per frame on an Arc iGPU (~8.5 M atomics to shared memory per frame).
+    static const bool atomic_store = [] {
+        const char* env = std::getenv("BB_MOTION_ATOMIC");
+        return env && env[0] == '1';
+    }();
+    if (atomic_store) {
+        const Id scalar_ptr =
+            ctx.TypePointer(spv::StorageClass::PhysicalStorageBuffer, u32_type);
+        const Id scope = ctx.ConstU32(static_cast<u32>(spv::Scope::Device));
+        for (u32 i = 0; i < 4; ++i) {
+            const Id ptr = ctx.OpConvertUToPtr(scalar_ptr,
+                ctx.OpIAdd(ctx.U64, store_address, ctx.Constant(ctx.U64, u64(i * 4))));
+            const Id bits =
+                ctx.OpBitcast(u32_type, ctx.OpCompositeExtract(ctx.F32[1], position, i));
+            ctx.OpAtomicExchange(u32_type, ptr, scope, ctx.u32_zero_value, bits);
+        }
+    } else {
+        ctx.OpStore(ctx.OpConvertUToPtr(f32x4_ptr, store_address), position,
+                    spv::MemoryAccessMask::Aligned, 16u);
     }
     ctx.OpBranch(store_merge);
     ctx.AddLabel(store_merge);

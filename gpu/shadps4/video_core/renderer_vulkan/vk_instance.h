@@ -138,6 +138,12 @@ public:
         return buffer_marker;
     }
 
+    /// bbport: VK_EXT_dynamic_rendering_unused_attachments (pipelines may leave a bound
+    /// attachment's format undefined).
+    bool IsUnusedAttachmentsSupported() const {
+        return unused_attachments;
+    }
+
     /// Returns true if VK_EXT_attachment_feedback_loop_layout is supported
     bool IsAttachmentFeedbackLoopLayoutSupported() const {
         return attachment_feedback_loop;
@@ -576,6 +582,7 @@ private:
     bool maintenance_8{};
     bool buffer_marker{};
     bool attachment_feedback_loop{};
+    bool unused_attachments{};
     bool image_2d_view_of_3d{};
     bool image_view_min_lod{};
     bool shader_clock{};

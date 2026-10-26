@@ -297,6 +297,8 @@ private:
     void NoteFrameStart();
     /// BB_GPU_PROFILE: a timestamp where a render pass starts (vk_gpu_profiler.h).
     void MarkPass(const GraphicsPipeline* pipeline, const RenderState& state);
+    /// BB_GPU_PROFILE=3: a pipeline statistics query for this draw, or ~0u.
+    u32 DrawStatsQuery(const GraphicsPipeline* pipeline, const RenderState& state);
     void BindVertexBuffers(const GraphicsPipeline* pipeline,
                            const PreparedDraw* prepared = nullptr);
     void BindIndexBuffer(u32 index_offset = 0);

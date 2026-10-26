@@ -160,6 +160,24 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
     }
 
     usage_flags = ImageUsageFlags(instance, info);
+    // bbport: BB_RT_COMPRESSION=1 (experiment): render targets without storage usage, the
+    // feedback loop usage and an open format list, and depth without mutable format; Intel
+    // drops lossless compression (CCS, HiZ) for images that allow those.
+    static const bool rt_compression = [] {
+        const char* env = std::getenv("BB_RT_COMPRESSION");
+        return env && env[0] == '1';
+    }();
+    if (rt_compression && !info.props.is_block && !info.props.is_volume) {
+        if (info.props.is_depth) {
+            flags &= ~(vk::ImageCreateFlagBits::eMutableFormat |
+                       vk::ImageCreateFlagBits::eExtendedUsage);
+        } else {
+            usage_flags &= ~(vk::ImageUsageFlagBits::eStorage |
+                             vk::ImageUsageFlagBits::eAttachmentFeedbackLoopEXT);
+            flags &= ~vk::ImageCreateFlagBits::eExtendedUsage;
+            restricted_views = true;
+        }
+    }
     format_features = FormatFeatureFlags(usage_flags);
     if (info.props.is_depth) {
         aspect_mask = vk::ImageAspectFlagBits::eDepth;
@@ -188,7 +206,27 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
                             ? image_format_properties.value.imageFormatProperties.sampleCounts
                             : vk::SampleCountFlagBits::e1;
 
+    if (restricted_views) {
+        // The format and its sRGB/UNORM twin (views reinterpret colour space only).
+        const auto twin = [](vk::Format f) {
+            switch (f) {
+            case vk::Format::eR8G8B8A8Unorm: return vk::Format::eR8G8B8A8Srgb;
+            case vk::Format::eR8G8B8A8Srgb: return vk::Format::eR8G8B8A8Unorm;
+            case vk::Format::eB8G8R8A8Unorm: return vk::Format::eB8G8R8A8Srgb;
+            case vk::Format::eB8G8R8A8Srgb: return vk::Format::eB8G8R8A8Unorm;
+            case vk::Format::eA8B8G8R8UnormPack32: return vk::Format::eA8B8G8R8SrgbPack32;
+            case vk::Format::eA8B8G8R8SrgbPack32: return vk::Format::eA8B8G8R8UnormPack32;
+            default: return f;
+            }
+        };
+        view_formats = {supported_format, twin(supported_format)};
+    }
+    const vk::ImageFormatListCreateInfo format_list{
+        .viewFormatCount = view_formats[0] == view_formats[1] ? 1u : 2u,
+        .pViewFormats = view_formats.data(),
+    };
     const vk::ImageCreateInfo image_ci = {
+        .pNext = restricted_views ? &format_list : nullptr,
         .flags = flags,
         .imageType = ConvertImageType(info.type),
         .format = supported_format,

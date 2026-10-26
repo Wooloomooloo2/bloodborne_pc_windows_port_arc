@@ -397,14 +397,28 @@ void VideoOutDriver::Flip(const Request& req) {
             clock_gettime(static_cast<clockid_t>(clock), &ts);
             gpu_ns = u64(ts.tv_sec) * 1000000000ull + u64(ts.tv_nsec);
         }
+#else
+        // bbport: GetThreadTimes per submission (no thread clock id on Windows); without it the
+        // stall breakdown below never printed.
+        gpu_ns = (user_us + sys_us) * 1000ull;
 #endif
         const u64 images = BbStats::images_registered.load();
         const u64 image_bytes = BbStats::image_upload_bytes.load();
         const u64 buffer_bytes = BbStats::buffer_upload_bytes.load();
+        // Compiles since the last frame (the counters restart with each 5 s window).
+        static u32 last_compiles;
+        static u64 last_compile_ns;
+        const u32 cur_compiles = Vulkan::g_bb_compiles.load();
+        const u64 cur_compile_ns = Vulkan::g_bb_compile_ns.load();
+        if (cur_compiles < last_compiles || cur_compile_ns < last_compile_ns) {
+            last_compiles = 0;
+            last_compile_ns = 0;
+        }
         if (frame_ms > 40.0 && last_gpu_ns != 0) {
-            std::printf("Stall: %.1f ms frame; GPU thread on CPU %.1f ms; %llu images registered, "
-                        "%.1f MB image uploads, %.1f MB buffer uploads\n",
-                        frame_ms, (gpu_ns - last_gpu_ns) / 1e6,
+            std::printf("Stall: %.1f ms frame; GPU thread on CPU %.1f ms; %u compiles %.1f ms; "
+                        "%llu images registered, %.1f MB image uploads, %.1f MB buffer uploads\n",
+                        frame_ms, (gpu_ns - last_gpu_ns) / 1e6, cur_compiles - last_compiles,
+                        (cur_compile_ns - last_compile_ns) / 1e6,
                         static_cast<unsigned long long>(images - last_images),
                         (image_bytes - last_image_bytes) / 1e6,
                         (buffer_bytes - last_buffer_bytes) / 1e6);
@@ -461,6 +475,8 @@ void VideoOutDriver::Flip(const Request& req) {
         last_invol = invol;
         last_vol = vol;
         last_gpu_ns = gpu_ns;
+        last_compiles = cur_compiles;
+        last_compile_ns = cur_compile_ns;
         last_images = images;
         last_image_bytes = image_bytes;
         last_buffer_bytes = buffer_bytes;

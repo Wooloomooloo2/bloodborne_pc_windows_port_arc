@@ -136,13 +136,18 @@ def output_size(settings):
 def scaled_sizes(settings):
     """(render, output) for an output other than 1080p (above it, or 720p for the Steam Deck):
     the game renders at output / preset scale (or at the output size without upscaler) and the
-    upscaler fills the output. None at 1080p and for TAA (native, live host targets only)."""
+    upscaler fills the output. None for TAA (native, live host targets only), and at 1080p
+    unless an upscaler preset reduces the scene: there the live path kept the game's buffers
+    and post-processing at 1080p and resampled reduced scene proxies back every frame, which
+    made XeSS Quality slower than native on Arc (40.9 vs 46.9 FPS; startup patch 57.1 FPS)
+    and washed the image out (docs/intel_opt.md, Session 4)."""
     out=output_size(settings)
-    if out==OUTPUT_SIZE or settings.get('upscaler')=='taa': return None
+    if settings.get('upscaler')=='taa': return None
     scale=1.0
     if settings.get('upscaler','fsr3')!='off':
         preset=int(settings.get('preset','0') or 0)
         scale=PRESET_SCALES[max(0,min(preset,len(PRESET_SCALES)-1))]
+    if out==OUTPUT_SIZE and scale==1.0: return None
     render=tuple(max(2,round(v/scale/2)*2) for v in out)
     # A scene of exactly 1920x1080 (4K Performance) is indistinguishable from the game's UI
     # coordinate space, which the port's UI composition recognizes by that size.
@@ -285,7 +290,14 @@ def main():
                    help='print "RENDER OUTPUT" (WxH) when bbport.ini selects an output other than 1080p')
     a=p.parse_args()
     if a.print_scaled:
-        sizes=scaled_sizes(read_settings(a.settings))
+        settings=read_settings(a.settings)
+        # The launcher's switches override bbport.ini (BB_UPSCALER=off: no upscaler, so no
+        # reduced scene; BB_UPSCALE_PRESET: another preset).
+        if 'BB_UPSCALER' in os.environ:
+            settings['upscaler']=os.environ['BB_UPSCALER']
+        if 'BB_UPSCALE_PRESET' in os.environ:
+            settings['preset']=os.environ['BB_UPSCALE_PRESET']
+        sizes=scaled_sizes(settings)
         if sizes: print(f'{sizes[0][0]}x{sizes[0][1]} {sizes[1][0]}x{sizes[1][1]}')
         return
     if a.print_preset_size:

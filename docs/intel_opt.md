@@ -142,6 +142,178 @@ vertex-shader invocations, fragment-shader invocations and clipped primitives fo
 draws. That will show which hypothesis holds. A follow-up is an Intel GPA frame capture of pass
 #151, for hardware counters (vertex fetch, pixel, memory).
 
+## Session 2 (2026-10-23): statistics, pass splits, method
+
+### Measurement method: alternate, don't compare runs
+
+FPS in the same view drifts by up to ~25% between launches on this laptop: 33–36 fps in the
+evening session, 45–46 fps an hour later, same build and settings (Balanced, on AC). That is
+probably power, thermal or background state. So a change is only judged by **alternating it
+within a session** (`BB_TOGGLE_FILE` bits are re-read every 250 ms) or by **A/B/A/B launches**
+(scratchpad `ab.sh`). Benchmarks use their own `BB_CONFIG` (a copy of `bbport.ini` at 1080p
+native), so they never touch, or depend on, the launcher's settings.
+
+### Pipeline statistics (`BB_GPU_PROFILE=3`, new)
+
+Per-draw `VK_QUERY_TYPE_PIPELINE_STATISTICS` totals per shader pair, printed with the
+timings. The per-draw queries cost a lot on Intel (about 28 fps against 35), so use this only
+for counts.
+
+Frame totals in the heavy view:
+
+| | per frame |
+|---|---|
+| Input-assembly vertices | 9.4 M |
+| VS invocations | 3.6 M |
+| Primitives in / after clipping | 3.1 M / 2.0 M |
+| Fragment invocations | 62.3 M (30× a 1080p screen, mostly about 20 full-screen post/lighting passes at 2.07 M each) |
+
+**The "10.6 ms" pair `vs 6a833138` + `ps bb10e440` is tiny:** 34 draws, 0.93 M VS invocations,
+0.62 M primitives, 1.3 M fragments. Its share in the level-2 timings is an attribution
+artefact. Timestamps inside a render pass charge the gap to whichever segment is open, and
+these draws open the G-buffer pass and interleave with other shaders. The G-buffer *pass* is
+still about 19 ms. The cost is not explained by shading volume.
+
+### Render-pass splits (`BB_PASS_SPLITS=1`, new)
+
+These are restarts of a render pass on the same attachments it just ended. Each one stores and
+reloads every attachment. Result: **37 splits/frame, about 150 attachment reloads/frame:**
+
+| Ended by | Splits/frame |
+|---|---|
+| HLE copy shader (`vk_shader_hle.cpp:229`): the game's compute copies between G-buffer draws | 17.0 |
+| `BufferCache::SynchronizeMemory` uploads (`buffer_cache.cpp:521`) | 6.1 |
+| `FlushBarriers` from `DrawRecord` (`vk_rasterizer.cpp:1017`) | 8.0 |
+| Other (`DrawRecord`, `MultiCopy`, `CopyImage`) | ~6 |
+
+**Tried and reverted: deferring the copy-shader transfers** past the open pass, flushing them on
+a dependent access or at the pass end. It cut splits from about 37.5 to about 32.4 per frame
+(171 transfers deferred, 12 dependent flushes per frame). Measured in three in-session on/off
+cycles, it made **no difference**: 45.4–46.4 fps both ways, about 15 µs/draw both ways. Pass
+splits are not the bottleneck on this GPU, so the extra complexity was not kept.
+
+## Session 3 (2026-10-24): stutter, memory corruption, HUD
+
+### Stall diagnostics now work on Windows
+
+`BB_FRAME_STATS=1` prints a breakdown for every frame over 40 ms ("Stall: ..."), but it keyed
+on a POSIX thread clock and never printed on Windows. It now uses the GPU thread's
+`GetThreadTimes` (15.6 ms granularity, so the user/kernel split is coarse) and also reports
+the shader/pipeline compiles in that frame (`driver.cpp`).
+
+### Area-load hitches: sparse residency allocations (fixed)
+
+From the title screen into the level, and walking (scripted, `walk.sh`):
+
+| | worst load frame | time making buffer memory resident | image refresh |
+|---|---|---|---|
+| before | 1149 ms | 373 ms | 695 ms |
+| after (2 runs) | 300 / 284 ms | 20 / 31 ms | 267 / 252 ms |
+
+`BufferCache::EnsureResident` called `vkAllocateMemory` once per newly used range of the
+sparse arena. Each is a kernel call on Windows (WDDM), and several hundred happen as an area
+streams in. Backing memory now comes from 32 MiB chunks that are sub-allocated (residency is
+never released, so a bump allocator is enough; at most one partly used chunk is wasted).
+`Backing::offset` is now in blocks, like `start`/`end`, so `CanMergeWith`/`SubRange` are exact.
+
+Still on the GPU thread during loads: image refresh (detile + upload, ~160 ms for 372 MB in
+the worst frame) and about 190 ms of kernel time (page protection: 116k pages in one frame).
+Hashing every mip (`XXH3` in `RefreshImage`) costs ~20 ms per load but cannot simply be
+skipped for non-GPU-modified images: the stored hash protects GPU-written data from stale CPU
+re-uploads later.
+
+Shader compiles: none during play with a warm cache. The pipeline cache persists across
+sessions on Windows (files from 10-09 still present; 64 new pipelines on 10-24). The Mac
+port's "stale pipelines wipe the cache every launch" bug does not trigger here.
+
+### Low allocator heap corruption (fixed, likely cause of the empty Repair menu)
+
+`runtime_low_free` (`src/runtime_memory.c`) read the block's size class after overwriting it
+with the free-list link, so freed blocks went onto the list named by the upper half of the old
+head pointer (8 for the `0x08_xxxx_xxxx` low range: the 8 KiB class). An 8 KiB request could
+then receive a 32-byte block, overlapping guest TLS, thread records and lock objects; the
+small classes leaked. The macOS port fixed this on 10-18. Windows-only symptom that matched:
+the workshop Repair list is empty on Windows with a save that works on macOS. To be confirmed
+in game.
+
+### HUD item icon missing off 1080p (fixed)
+
+Ported macOS #17: Scaleform draws the item slot's stencil mask depth-only, and only
+single-color-target draws reached the upscaler, so the mask went into the guest depth while
+the icon was redirected to the host UI depth with a cleared stencil. Depth-only movie-shader
+draws in the UI phase now prepare and bind the host UI depth (`vk_rasterizer.cpp`,
+`TemporalUpscaler::OnDraw`). Verified at 2560x1440 output: the Molotov icon renders.
+
+### Frame pacing
+
+At 40-50 fps the guest flips at vblank (60 Hz), so frames alternate 16.7 and 33.3 ms
+(stddev ~7.5 ms, 50-90 frames over 1.5x median per 5 s). This judder reads as stutter even
+without hitches. The panel runs at 60 Hz but supports 120 Hz; options to evaluate: a 120 Hz
+desktop mode, VRR, or a 40 fps mode (guest pacing at a 120 Hz vblank).
+
+## Session 4 (2026-10-26): XeSS quality and performance
+
+Heavy view, scripted launches (`xess4.sh`), XeSS Quality (1.5x) at 1080p output:
+
+| | FPS | GPU ms/frame |
+|---|---|---|
+| native, no upscaler | 46.9 | 21.3 |
+| XeSS, live resolution path (what Windows users got) | 40.9 | 24.5 |
+| **XeSS, startup patch (scene 1280x720)** | **57.1** | **17.5** |
+| XeSS + object motion, live path | 24.4 | 41.3 |
+| XeSS + object motion, startup patch | 20.5 | 49.0 |
+
+(The two object-motion rows ran in a slower power state: native measured 38.5 FPS then.)
+
+### Fixed: XeSS ran on the slow path on Windows
+
+- **`run.bat` never applied the startup patch.** Its `for /f ('"%PYTHON%" ... "%BB_CONFIG%"')`
+  query lost its quotes to cmd's quote stripping and silently returned nothing, so every
+  scaled preset at every output size ran on the live path. Now wrapped in an extra pair of
+  quotes, with the `2>nul` redirect outside them.
+- **1080p output with a reducing preset now uses the startup patch too**
+  (`patches.py scaled_sizes`). The live path keeps the game's buffers and post-processing at
+  1080p, reduces only 56 of 134 scene draws, and resolves the reduced proxies back every
+  frame. That cost more than it saved, and the extra resampling washed out the image.
+  `--print-scaled` now honours the launcher's `BB_UPSCALER` / `BB_UPSCALE_PRESET`
+  overrides, so "upscaler off" never leaves a reduced scene. As for other outputs, a preset
+  change at 1080p needs a restart (`BB_AUTO_RENDER_RES` recomputes it).
+- Tests: `tests/test_patches.py` and `tests/test_run_settings.py` updated.
+
+### Checked
+
+- **Jitter sign: the default is right.** Flipping it live (toggle bit 26) while standing
+  still gives a visibly blurrier and hazier image (frame mean 38.4 vs 35.1, native 34.8).
+  The Laplacian "sharpness" metric is not comparable across AA methods: native's dithering
+  and grass shimmer inflate it about 10x.
+- **XeSS itself costs about 2.4-2.7 ms/frame** at 1280x720 → 1920x1080.
+
+### Remaining problems and plan
+
+1. **Ghosting of the character and moving objects** (10-26: see docs/xess.md, object motion cost) (the main artefact when moving). Object
+   motion vectors are off by default (`object_motion=0`; the launcher switch can only force
+   them off). With them on, the G-buffer cost explodes: motion draws add an 8th colour
+   attachment and the rest don't, so the pass is split wherever they alternate (about 136
+   motion draws per frame), and each split reloads 6-8 full-screen targets.
+   *Plan:* while object motion is on, bind the motion attachment for every G-buffer draw.
+   Non-motion pipelines get a key bit that declares the 8th format with a zero write mask.
+   Then measure splits (`BB_PASS_SPLITS=1`) and GPU time again. If that brings the cost
+   under ~2 ms, turn object motion on by default whenever a temporal upscaler is active, and
+   make the launcher switch able to force it on.
+2. **Residual haze/softness.** Compare a dumped XeSS input against the output
+   (`BB_DUMP_TRIGGER`). Try `exposureScale` and auto-exposure off for the HDR input, and the
+   tonemapped (LDR) input placement, and check which post effects run at 720p (DOF, bloom).
+3. **Sharpening.** XeSS has none of its own; check that the RCAS default (0.30) suits
+   1.5x on Arc.
+4. **Start-up reliability.** About 3 of 25 scripted launches today either stopped at a black
+   screen right after "pad opened" or crashed with guest fault `0x20b56d2` (also in the
+   10-09 crash logs). `session.sh` now detects a title hang, saves the log and thread CPU,
+   and retries. The cause is not investigated yet.
+5. **The "fast/slow launch" G-buffer bimodality** (Session 3: `vs 6a833138` + `ps bb10e440`
+   3.8 vs 11.0 ms per launch) affects every mode. `BB_TRACE_PS=bb10e440` prints the images
+   it samples, so a fast and a slow launch can be compared.
+6. **XeSS 2 frame generation / XeLL** need D3D12 present interop (see below).
+
 ## API, upscaling and frame generation
 
 - **Stay on Vulkan for now.** Intel's driver compiles SPIR-V and DXIL with the same shader

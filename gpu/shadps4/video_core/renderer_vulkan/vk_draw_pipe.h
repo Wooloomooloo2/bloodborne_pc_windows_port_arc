@@ -114,11 +114,34 @@ public:
         const u32 slot = reason < NumReasons ? reason : ReasonRasterizer;
         ++drains_by_reason[slot];
         const u64 start = __rdtsc();
-        for (u32 spins = 0; consumed.load(std::memory_order_acquire) != head; ++spins) {
-            if (spins < 4096) {
-                __builtin_ia32_pause();
-            } else {
-                std::this_thread::yield();
+        // bbport: BB_DRAIN_SLEEP_US=n (experiment): after spinning n us, sleep until stage B
+        // reports progress instead of yielding in a loop. Drains are ~half of this thread's
+        // time; on an iGPU a spinning core takes package power from the GPU.
+        static const s64 sleep_after = [] {
+            const char* env = std::getenv("BB_DRAIN_SLEEP_US");
+            return env ? s64(std::max(0, std::atoi(env))) : s64(-1);
+        }();
+        if (sleep_after >= 0) {
+            const u64 spin_until = start + u64(sleep_after) * TscPerUs();
+            u64 seen;
+            while ((seen = consumed.load(std::memory_order_acquire)) != head) {
+                if (__rdtsc() < spin_until) {
+                    __builtin_ia32_pause();
+                    continue;
+                }
+                drain_waiting.store(true, std::memory_order_seq_cst);
+                if (consumed.load(std::memory_order_seq_cst) == seen) {
+                    consumed.wait(seen, std::memory_order_seq_cst);
+                }
+                drain_waiting.store(false, std::memory_order_relaxed);
+            }
+        } else {
+            for (u32 spins = 0; consumed.load(std::memory_order_acquire) != head; ++spins) {
+                if (spins < 4096) {
+                    __builtin_ia32_pause();
+                } else {
+                    std::this_thread::yield();
+                }
             }
         }
         const u64 waited = __rdtsc() - start;
@@ -165,6 +188,21 @@ private:
         u32 payload; ///< bytes written by the producer
     };
     static constexpr u64 Capacity = 16ull << 20;
+
+    /// TSC ticks per microsecond, measured once.
+    static u64 TscPerUs() {
+        static const u64 value = [] {
+            const auto t0 = std::chrono::steady_clock::now();
+            const u64 c0 = __rdtsc();
+            while (std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(2)) {
+            }
+            const double us = std::chrono::duration<double, std::micro>(
+                                  std::chrono::steady_clock::now() - t0)
+                                  .count();
+            return std::max<u64>(1, u64(double(__rdtsc() - c0) / us));
+        }();
+        return value;
+    }
 
     static constexpr u32 Align(u32 size) {
         return (size + 63) & ~63u;
@@ -219,14 +257,20 @@ private:
             const auto* header = reinterpret_cast<const Header*>(ring.get() + at % Capacity);
             if (header->size == 0) {
                 at += Capacity - at % Capacity;
-                consumed.store(at, std::memory_order_release);
+                consumed.store(at, std::memory_order_seq_cst);
+                if (drain_waiting.load(std::memory_order_seq_cst)) {
+                    consumed.notify_all();
+                }
                 continue;
             }
             const u64 start = __rdtsc();
             handler(context, reinterpret_cast<const u8*>(header + 1), header->payload);
             busy_cycles.fetch_add(__rdtsc() - start, std::memory_order_relaxed);
             at += header->size;
-            consumed.store(at, std::memory_order_release);
+            consumed.store(at, std::memory_order_seq_cst);
+            if (drain_waiting.load(std::memory_order_seq_cst)) {
+                consumed.notify_all();
+            }
         }
     }
 
@@ -240,6 +284,7 @@ private:
     alignas(64) std::atomic<u64> consumed{0};
     alignas(64) std::atomic<u32> wake{0};
     std::atomic<bool> sleeping{false};
+    std::atomic<bool> drain_waiting{false}; ///< stage A sleeps in Drain (BB_DRAIN_SLEEP_US)
     std::atomic<u32> stage_b_tid{0};
     std::jthread thread;
 };

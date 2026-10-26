@@ -172,6 +172,11 @@ public:
 
     vk::ImageUsageFlags usage_flags;
     vk::FormatFeatureFlags2 format_features;
+    /// bbport: BB_RT_COMPRESSION=1 experiment: created without storage usage and with only
+    /// these view formats (lets Intel keep render target compression). Views outside them
+    /// are reported (ImageView).
+    bool restricted_views = false;
+    std::array<vk::Format, 2> view_formats{};
     struct State {
         vk::PipelineStageFlags2 pl_stage = vk::PipelineStageFlagBits2::eAllCommands;
         vk::AccessFlags2 access_mask = vk::AccessFlagBits2::eNone;

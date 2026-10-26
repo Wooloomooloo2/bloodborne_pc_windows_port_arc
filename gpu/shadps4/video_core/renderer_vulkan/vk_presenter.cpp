@@ -17,6 +17,7 @@
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/texture_cache/image.h"
+#include <vulkan/vulkan_format_traits.hpp>
 
 #include <algorithm>
 #include <array>
@@ -409,6 +410,53 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
         auto& image = texture_cache.GetImage(image_id);
         image_view = *image.FindView(view_info).image_view;
         image_size = vk::Extent2D{image.info.size.width, image.info.size.height};
+        // bbport: BB_SCREENSHOT_TRIGGER=<file>: creating it writes this displayed guest frame
+        // (4 bytes per pixel, before the presenter's scaling) to
+        // BB_DUMP_DIR/shot_<n>_<w>x<h>_<format>.raw, for A/B checks of rendering changes.
+        static const char* shot = std::getenv("BB_SCREENSHOT_TRIGGER");
+        if (shot && vk::blockSize(image.info.pixel_format) == 4 && std::remove(shot) == 0) {
+            static int shots = 0;
+            static const std::string dir = [] {
+                const char* env = std::getenv("BB_DUMP_DIR");
+                return std::string{env && env[0] ? env : "out/dump"};
+            }();
+            runtime.Transit(&image, vk::ImageLayout::eTransferSrcOptimal,
+                            vk::PipelineStageFlagBits2::eTransfer,
+                            vk::AccessFlagBits2::eTransferRead);
+            runtime.FlushBarriers();
+            const VkDeviceSize size = VkDeviceSize(image_size.width) * image_size.height * 4;
+            const VkBufferCreateInfo buffer_ci{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                               .size = size,
+                                               .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+            const VmaAllocationCreateInfo alloc_ci{
+                .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                         VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
+                .usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST};
+            VkBuffer buffer{};
+            VmaAllocation allocation{};
+            VmaAllocationInfo info{};
+            if (vmaCreateBuffer(instance.GetAllocator(), &buffer_ci, &alloc_ci, &buffer,
+                                &allocation, &info) == VK_SUCCESS) {
+                const vk::BufferImageCopy region{
+                    .imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+                    .imageExtent = {image_size.width, image_size.height, 1}};
+                cmdbuf.copyImageToBuffer(image.GetImage(), vk::ImageLayout::eTransferSrcOptimal,
+                                         buffer, region);
+                const std::string file = fmt::format(
+                    "{}/shot_{:03}_{}x{}_{}.raw", dir, shots++, image_size.width,
+                    image_size.height, vk::to_string(image.info.pixel_format));
+                draw_scheduler.DeferPriorityOperation(
+                    [allocator = instance.GetAllocator(), buffer, allocation, info, size, file] {
+                        vmaInvalidateAllocation(allocator, allocation, 0, VK_WHOLE_SIZE);
+                        if (FILE* f = std::fopen(file.c_str(), "wb")) {
+                            std::fwrite(info.pMappedData, 1, size, f);
+                            std::fclose(f);
+                        }
+                        vmaDestroyBuffer(allocator, buffer, allocation);
+                    });
+                std::printf("Screenshot: %s\n", file.c_str());
+            }
+        }
         runtime.Transit(&image, vk::ImageLayout::eShaderReadOnlyOptimal,
                         vk::PipelineStageFlagBits2::eFragmentShader,
                         vk::AccessFlagBits2::eShaderRead);

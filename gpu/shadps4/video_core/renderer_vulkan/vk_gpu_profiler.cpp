@@ -9,9 +9,22 @@
 
 namespace Vulkan {
 
+namespace {
+
+/// BB_GPU_PROFILE=3: the statistics counted per draw, in Vulkan's result order (bit order).
+constexpr vk::QueryPipelineStatisticFlags DrawStatistics =
+    vk::QueryPipelineStatisticFlagBits::eInputAssemblyVertices |
+    vk::QueryPipelineStatisticFlagBits::eInputAssemblyPrimitives |
+    vk::QueryPipelineStatisticFlagBits::eVertexShaderInvocations |
+    vk::QueryPipelineStatisticFlagBits::eClippingInvocations |
+    vk::QueryPipelineStatisticFlagBits::eClippingPrimitives |
+    vk::QueryPipelineStatisticFlagBits::eFragmentShaderInvocations;
+
+} // namespace
+
 void GpuProfiler::Init(const Instance& instance, Scheduler& scheduler) {
     const char* env = std::getenv("BB_GPU_PROFILE");
-    if (!env || (env[0] != '1' && env[0] != '2') || instance_ptr) {
+    if (!env || env[0] < '1' || env[0] > '3' || instance_ptr) {
         return;
     }
     instance_ptr = new GpuProfiler(instance, scheduler, env[0] - '0');
@@ -29,8 +42,22 @@ GpuProfiler::GpuProfiler(const Instance& instance, Scheduler& scheduler_, int le
     for (auto& k : keys) {
         k.reserve(SliceQueries);
     }
-    std::printf("GPU profile: on (timestamp period %.2f ns, level %d%s)\n", period_ns, level,
-                level >= 2 ? ": per shader pair inside passes" : "");
+    if (level >= 3 && instance.GetPhysicalDevice().getFeatures().pipelineStatisticsQuery) {
+        const vk::QueryPoolCreateInfo stats_info = {
+            .queryType = vk::QueryType::ePipelineStatistics,
+            .queryCount = NumSlices * SliceStats,
+            .pipelineStatistics = DrawStatistics,
+        };
+        stats_pool =
+            Check<"create statistics query pool">(device.createQueryPoolUnique(stats_info));
+        device.resetQueryPool(*stats_pool, 0, NumSlices * SliceStats);
+        for (auto& k : stats_keys) {
+            k.reserve(SliceStats);
+        }
+    }
+    std::printf("GPU profile: on (timestamp period %.2f ns, level %d%s%s)\n", period_ns, level,
+                level >= 2 ? ": per shader pair inside passes" : "",
+                stats_pool ? ", pipeline statistics per draw" : "");
 }
 
 void GpuProfiler::WriteTimestamp(u64 key, bool end_rendering) {
@@ -68,8 +95,13 @@ void GpuProfiler::BeginFrame() {
     if (used[slice]) {
         device.resetQueryPool(*pool, slice * SliceQueries, used[slice]);
     }
+    if (stats_used[slice]) {
+        device.resetQueryPool(*stats_pool, slice * SliceStats, stats_used[slice]);
+    }
     used[slice] = 0;
     keys[slice].clear();
+    stats_used[slice] = 0;
+    stats_keys[slice].clear();
     pending[slice] = false;
     Print();
 }
@@ -91,6 +123,21 @@ void GpuProfiler::Collect(u32 which) {
         ++total.segments;
     }
     ++frames;
+    if (const u32 n = stats_used[which]; n) {
+        std::vector<u64> values(size_t(n) * NumStats);
+        const auto stats_result = device.getQueryPoolResults(
+            *stats_pool, which * SliceStats, n, values.size() * sizeof(u64), values.data(),
+            NumStats * sizeof(u64), vk::QueryResultFlagBits::e64 | vk::QueryResultFlagBits::eWait);
+        if (stats_result == vk::Result::eSuccess) {
+            for (u32 i = 0; i < n; ++i) {
+                auto& s = stats[stats_keys[which][i]];
+                for (u32 j = 0; j < NumStats; ++j) {
+                    s.sum[j] += double(values[size_t(i) * NumStats + j]);
+                }
+                ++s.draws;
+            }
+        }
+    }
 }
 
 void GpuProfiler::Print() {
@@ -111,6 +158,31 @@ void GpuProfiler::Print() {
         const auto& [key, total] = sorted[i];
         std::printf("  %6.3f ms/frame %5.1f/frame  %s\n", total.ms / frames,
                     double(total.segments) / frames, described[key].c_str());
+    }
+    if (!stats.empty()) {
+        // Per frame, by fragment shader invocations: pixel work (overdraw) next to vertex work.
+        std::vector<std::pair<u64, Stats>> by_pixels(stats.begin(), stats.end());
+        std::ranges::sort(by_pixels,
+                          [](const auto& a, const auto& b) { return a.second.sum[5] > b.second.sum[5]; });
+        std::array<double, NumStats> all{};
+        for (const auto& [key, s] : by_pixels) {
+            for (u32 j = 0; j < NumStats; ++j) {
+                all[j] += s.sum[j];
+            }
+        }
+        const double f = double(frames);
+        std::printf("GPU statistics per frame: %.2fM vertices, %.2fM VS invocations, %.2fM "
+                    "primitives in, %.2fM out of clipping, %.2fM fragment invocations "
+                    "(%.2fx 1080p)\n",
+                    all[0] / f / 1e6, all[2] / f / 1e6, all[1] / f / 1e6, all[4] / f / 1e6,
+                    all[5] / f / 1e6, all[5] / f / (1920.0 * 1080.0));
+        for (size_t i = 0; i < std::min<size_t>(by_pixels.size(), 30); ++i) {
+            const auto& [key, s] = by_pixels[i];
+            std::printf("  %7.3fM frag %6.3fM VS %6.3fM prim in %6.3fM out %5.1f draws  %s\n",
+                        s.sum[5] / f / 1e6, s.sum[2] / f / 1e6, s.sum[1] / f / 1e6,
+                        s.sum[4] / f / 1e6, double(s.draws) / f, described[key].c_str());
+        }
+        stats.clear();
     }
     totals.clear();
     frames = 0;

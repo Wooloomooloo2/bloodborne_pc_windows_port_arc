@@ -102,6 +102,7 @@ void Runtime::TickFrame() {
 
 void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* dst,
                          std::span<const vk::BufferCopy> copies) {
+    scheduler.split_hint = __builtin_return_address(0);
     scheduler.EndRendering();
 
     // bbport: many regions (HLE copy shaders) are tracked as one bounding range per buffer:
@@ -830,6 +831,7 @@ void Runtime::FlushBarriers() {
         return;
     }
 
+    scheduler.split_hint = __builtin_return_address(0);
     scheduler.EndRendering();
     scheduler.Record([memory = memory_barrier, has_memory = dep_info.memoryBarrierCount != 0,
                       images = scheduler.RecordData(std::span<const vk::ImageMemoryBarrier2>(

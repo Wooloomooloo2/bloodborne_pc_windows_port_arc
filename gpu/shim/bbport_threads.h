@@ -6,6 +6,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdlib>
 #include <thread>
 
 #ifdef _WIN32
@@ -58,7 +59,15 @@ inline unsigned Available() {
 /// The calling thread only runs on otherwise idle cores (falls back to the lowest nice level).
 inline void MakeBackground() {
 #ifdef _WIN32
-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
+    // BB_BACKGROUND_PRIORITY=idle (default) | below | normal: A/B knob for hybrid CPUs, where
+    // idle-priority helpers can land on the low-power cores and hold locks the GPU thread wants.
+    static const int priority = [] {
+        const char* env = std::getenv("BB_BACKGROUND_PRIORITY");
+        if (env && env[0] == 'b') return THREAD_PRIORITY_BELOW_NORMAL;
+        if (env && env[0] == 'n') return THREAD_PRIORITY_NORMAL;
+        return THREAD_PRIORITY_IDLE;
+    }();
+    SetThreadPriority(GetCurrentThread(), priority);
 #else
     sched_param param{};
     if (sched_setscheduler(0, SCHED_IDLE, &param) != 0) {

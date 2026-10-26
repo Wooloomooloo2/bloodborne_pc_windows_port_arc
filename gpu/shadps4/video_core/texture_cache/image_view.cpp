@@ -8,6 +8,8 @@
 #include "video_core/texture_cache/image.h"
 #include "video_core/texture_cache/image_view.h"
 
+#include <atomic>
+#include <cstdio>
 #include <magic_enum/magic_enum.hpp>
 
 namespace VideoCore {
@@ -95,6 +97,18 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     vk::ImageViewUsageCreateInfo usage_ci{.usage = image.usage_flags};
     if (!info.is_storage) {
         usage_ci.usage &= ~vk::ImageUsageFlagBits::eStorage;
+    }
+    // bbport: BB_RT_COMPRESSION experiment: which views the restricted images would need.
+    if (image.restricted_views &&
+        (info.is_storage || (info.format != image.view_formats[0] &&
+                             info.format != image.view_formats[1]))) {
+        static std::atomic<u32> reports{0};
+        if (reports.fetch_add(1, std::memory_order_relaxed) < 64) {
+            std::printf("RT compression: %s view %s of %ux%u %s image\n",
+                        info.is_storage ? "storage" : "other-format",
+                        vk::to_string(info.format).c_str(), image.info.size.width,
+                        image.info.size.height, vk::to_string(image.info.pixel_format).c_str());
+        }
     }
     vk::ImageViewMinLodCreateInfoEXT min_lod_ci{};
     if (info.min_lod != 0 && instance.IsImageViewMinLodSupported()) {

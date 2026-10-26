@@ -4,9 +4,28 @@
 #include "shader_recompiler/backend/spirv/emit_spirv_instructions.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
 
+#include <cstdlib>
+#include <cstring>
+
 namespace Shader::Backend::SPIRV {
 
+// bbport: BB_SPIRV_PRECISE=vertex (experiment): NoContraction ("precise") only outside the
+// fragment and compute stages, so the driver may fuse multiply-adds there; positions stay
+// precise so depth prepasses and later passes still agree. Default: every FP op, as upstream.
+// Not part of the cache key: test with BB_PIPELINE_CACHE=0.
+static bool PreciseVertexOnly() {
+    static const bool value = [] {
+        const char* env = std::getenv("BB_SPIRV_PRECISE");
+        return env && !std::strcmp(env, "vertex");
+    }();
+    return value;
+}
+
 Id Decorate(EmitContext& ctx, IR::Inst* inst, Id op) {
+    if (PreciseVertexOnly() &&
+        (ctx.sw_stage == SwStage::Fragment || ctx.sw_stage == SwStage::Compute)) {
+        return op;
+    }
     ctx.Decorate(op, spv::Decoration::NoContraction);
     return op;
 }

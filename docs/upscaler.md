@@ -78,7 +78,10 @@ copy took nine draws.
 - `run.sh` again patches the game's render size for outputs other than 1080p (as in 0.1) and
   marks it with `BB_AUTO_RENDER_RES=1`, so an in-game restart recomputes it. Preset and output
   changes then need a restart (the menu offers it). `BB_LIVE_RES=1` selects the live path.
-  1080p output and TAA keep the live path.
+  TAA and native 1080p keep the live path. Since 2026-10-26 a reducing preset at 1080p output
+  is patched too: on an Arc B390 the live path made XeSS Quality slower than native (40.9
+  vs 46.9 FPS; patched 57.1 FPS). On Windows `run.bat`'s size query had never worked
+  (cmd quote stripping), so no output was patched there before that date.
 - Depth/stencil scene proxies need `VK_EXT_shader_stencil_export` again; without it these
   targets stay native (as in 0.1). `BB_SCENE_STENCIL_BITS=1` still forces the portable
   resampler for tests.

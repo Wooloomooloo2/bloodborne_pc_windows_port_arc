@@ -108,7 +108,9 @@ set "fps=%BB_FPS%"
 set "scaled_render="
 set "scaled_output="
 if "%BB_RENDER_RES%"=="" (
-    for /f "tokens=1,2" %%a in ('"%PYTHON%" scripts\patches.py --print-scaled --settings "%BB_CONFIG%" 2^>nul') do (
+    REM The outer quotes survive cmd's quote stripping (with two quoted paths it removed the
+    REM first and last quote, the query failed silently and no output was ever patched).
+    for /f "tokens=1,2" %%a in ('""%PYTHON%" scripts\patches.py --print-scaled --settings "%BB_CONFIG%"" 2^>nul') do (
         set "scaled_render=%%a"
         set "scaled_output=%%b"
     )

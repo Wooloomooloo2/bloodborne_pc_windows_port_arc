@@ -172,7 +172,7 @@ private:
 
     struct Backing : public Interval {
         vk::DeviceMemory memory;
-        u64 offset;
+        u64 offset; ///< in blocks (as start and end), so merging and splitting stay exact
         constexpr bool CanMergeWith(const Backing& other) const noexcept {
             return memory == other.memory && offset + (end - start) == other.offset;
         }
@@ -181,6 +181,9 @@ private:
         }
     };
     IntervalList<Backing> resident_ranges;
+    static constexpr u64 RESIDENCY_CHUNK_SIZE = 32_MB;
+    vk::DeviceMemory residency_chunk{};
+    u64 residency_chunk_used{};
 
     u32 arena_memory_type_index{};
     u32 block_size{};

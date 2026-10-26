@@ -704,11 +704,16 @@ void runtime_low_free(void *ptr) {
     if (!ptr) return;
     LowHeader *hdr = (LowHeader *)ptr - 1;
     if (hdr->magic != 0x4C4F5741) return;
-    if (hdr->size_class < NUM_LOW_CLASSES) {
+    const uint32_t sc = hdr->size_class;
+    if (sc < NUM_LOW_CLASSES) {
         host_mutex_lock(&low_alloc_lock);
+        /* The link overlays the header's magic and size class: read the class first (reading
+         * it after the store filed every freed block under the class named by the upper half
+         * of the old list head, so the small classes leaked and the 8 KiB class handed out
+         * 64-byte blocks: guest TLS and thread records overlapped live lock objects). */
         LowFreeNode *node = (LowFreeNode *)hdr;
-        node->next = low_freelists[hdr->size_class];
-        low_freelists[hdr->size_class] = node;
+        node->next = low_freelists[sc];
+        low_freelists[sc] = node;
         host_mutex_unlock(&low_alloc_lock);
     }
 }

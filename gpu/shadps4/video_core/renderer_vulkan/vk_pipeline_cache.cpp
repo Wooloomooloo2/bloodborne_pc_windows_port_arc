@@ -27,6 +27,7 @@
 #include "video_core/renderer_vulkan/motion_history.h"
 #include "video_core/renderer_vulkan/vk_draw_prep.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_object_motion.h"
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -644,6 +645,10 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
         key.write_masks[mv] = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
                               vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
         key.color_samples[mv] = 1;
+    } else if (motion_possible && ObjectMotion::UniformAttachment(instance)) {
+        // bbport: declare the motion slot (format undefined, nothing written) so this
+        // pipeline draws into the same attachment set as the motion pipelines.
+        key.num_color_attachments = Shader::MotionVectors::Output + 1;
     }
 
     // Force all color samples to match depth samples to avoid unsupported MSAA configuration

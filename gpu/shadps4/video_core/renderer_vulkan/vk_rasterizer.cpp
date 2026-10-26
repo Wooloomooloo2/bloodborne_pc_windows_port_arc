@@ -983,10 +983,12 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     motion_geometry = 0;
 
     PrepareRenderState(pipeline);
-    if (upscaler->Enabled() && std::popcount(pipeline->GetGraphicsKey().mrt_mask) == 1) {
+    // bbport: one color target, or none with a depth target (Scaleform's stencil masks).
+    if (const u32 mrt_mask = pipeline->GetGraphicsKey().mrt_mask;
+        upscaler->Enabled() && (std::popcount(mrt_mask) == 1 || (mrt_mask == 0 && db_desc.first))) {
         const auto& viewport = Regs().viewports[0];
         upscaler->OnDraw(pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash,
-                         cb_descs[0].first, db_desc.first,
+                         mrt_mask ? cb_descs[0].first : VideoCore::ImageId{}, db_desc.first,
                          UiComposition::NativeViewport(viewport.xscale * 2, viewport.yscale * 2));
     }
     const PreparedDraw* draw_prepared = bind_prepared;
@@ -1125,12 +1127,21 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const u32 num_instances = regs.num_instances.NumInstances();
     const u32 first_vertex = vertex_offset;
     const u32 first_instance = instance_offset;
+    const u32 stats_query = DrawStatsQuery(pipeline, state);
+    const vk::QueryPool stats_pool =
+        stats_query != ~0u ? GpuProfiler::Get()->StatsPool() : vk::QueryPool{};
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
+        if (stats_pool) {
+            cmdbuf.beginQuery(stats_pool, stats_query, {});
+        }
         if (is_indexed) {
             cmdbuf.drawIndexed(num_indices, num_instances, 0, s32(first_vertex), first_instance);
         } else {
             cmdbuf.draw(num_indices, num_instances, first_vertex, first_instance);
+        }
+        if (stats_pool) {
+            cmdbuf.endQuery(stats_pool, stats_query);
         }
     });
     if (FrameCapture::Active()) {
@@ -1217,10 +1228,12 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     motion_draw = false;
     motion_geometry = 0;
     PrepareRenderState(pipeline);
-    if (upscaler->Enabled() && std::popcount(pipeline->GetGraphicsKey().mrt_mask) == 1) {
+    // bbport: one color target, or none with a depth target (Scaleform's stencil masks).
+    if (const u32 mrt_mask = pipeline->GetGraphicsKey().mrt_mask;
+        upscaler->Enabled() && (std::popcount(mrt_mask) == 1 || (mrt_mask == 0 && db_desc.first))) {
         const auto& viewport = Regs().viewports[0];
         upscaler->OnDraw(pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash,
-                         cb_descs[0].first, db_desc.first,
+                         mrt_mask ? cb_descs[0].first : VideoCore::ImageId{}, db_desc.first,
                          UiComposition::NativeViewport(viewport.xscale * 2, viewport.yscale * 2));
     }
     if (!BindResources(pipeline)) {
@@ -1269,8 +1282,14 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     const u64 args_offset = base;
     const vk::Buffer counts = count_address != 0 ? count_buffer->Handle() : vk::Buffer{};
     const u64 counts_offset = count_address != 0 ? count_offset : 0;
+    const u32 stats_query = DrawStatsQuery(pipeline, state);
+    const vk::QueryPool stats_pool =
+        stats_query != ~0u ? GpuProfiler::Get()->StatsPool() : vk::QueryPool{};
     scheduler.Record([=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
+        if (stats_pool) {
+            cmdbuf.beginQuery(stats_pool, stats_query, {});
+        }
         if (is_indexed) {
             if (counts) {
                 cmdbuf.drawIndexedIndirectCount(args, args_offset, counts, counts_offset, max_count,
@@ -1282,6 +1301,9 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
             cmdbuf.drawIndirectCount(args, args_offset, counts, counts_offset, max_count, stride);
         } else {
             cmdbuf.drawIndirect(args, args_offset, max_count, stride);
+        }
+        if (stats_pool) {
+            cmdbuf.endQuery(stats_pool, stats_query);
         }
     });
     DebugState.IncDrawCall();
@@ -2414,6 +2436,15 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                 !binding.is_target &&
                 !(upscaler->Enabled() && upscaler->RedirectsSampled(image_id))) {
                 if (const auto proxy = scene_targets->SampleProxy(image, desc.view_info)) {
+                    static const u64 proxy_traced_ps = [] {
+                        const char* env = std::getenv("BB_TRACE_PS");
+                        return env ? std::strtoull(env, nullptr, 16) : 0ull;
+                    }();
+                    if (proxy_traced_ps && stage.pgm_hash == proxy_traced_ps) {
+                        std::printf("Trace ps %08x: binding %u image %u %ux%u sampled via proxy\n",
+                                    u32(stage.pgm_hash), binding_index, image_id.index,
+                                    image.info.size.width, image.info.size.height);
+                    }
                     image.usage.texture = 1u;
                     image_infos.emplace_back(VK_NULL_HANDLE, proxy->view, proxy->layout);
                     if (set_ok && binding_index < resolved.size()) {
@@ -2463,6 +2494,31 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
             if (upscaler->Enabled()) {
                 // bbport: the display pass reads the upscaled frame (scaled presets).
                 upscaler->RedirectSampled(image_id, image_view.info, view, layout);
+            }
+            // bbport: BB_TRACE_PS=<hex hash>: the images that pixel shader samples (first 48),
+            // to compare launches where its draws cost different amounts.
+            static const u64 traced_ps = [] {
+                const char* env = std::getenv("BB_TRACE_PS");
+                return env ? std::strtoull(env, nullptr, 16) : 0ull;
+            }();
+            if (traced_ps && stage.pgm_hash == traced_ps) {
+                static std::atomic<u32> traces{0};
+                if (traces.fetch_add(1, std::memory_order_relaxed) < 48) {
+                    std::printf("Trace ps %08x: binding %u image %u %ux%u %s mips %u/%u view "
+                                "mips %u+%u layers %u tile %u layout %s storage %u target %u "
+                                "general %u addr %llx size %llu\n",
+                                u32(traced_ps), binding_index, image_id.index,
+                                image.info.size.width, image.info.size.height,
+                                vk::to_string(image.info.pixel_format).c_str(),
+                                image.info.resources.levels, image.backing ? 1u : 0u,
+                                image_view.info.range.base.level,
+                                image_view.info.range.extent.levels,
+                                image.info.resources.layers, u32(image.info.tile_mode),
+                                vk::to_string(layout).c_str(), u32(is_storage),
+                                u32(binding.is_target), u32(binding.force_general),
+                                static_cast<unsigned long long>(image.info.guest_address),
+                                static_cast<unsigned long long>(image.info.guest_size));
+                }
             }
             image_infos.emplace_back(VK_NULL_HANDLE, view, layout);
             if (set_ok && binding_index < resolved.size()) {
@@ -3053,8 +3109,12 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
             db_desc.first ? &texture_cache.GetImage(db_desc.first).info : nullptr;
         FrameCapture::BeginPass(colors.data(), state.num_color_attachments, depth);
     }
-    // bbport: object motion vector attachment of G-buffer pipelines.
-    if (key.motion_vectors) {
+    // bbport: object motion vector attachment of G-buffer pipelines, also for those that only
+    // declare the slot (ObjectMotion::UniformAttachment: no pass split between them).
+    constexpr u32 mv_slot = Shader::MotionVectors::Output;
+    if (key.motion_vectors ||
+        (key.num_color_attachments == mv_slot + 1 && !(key.mrt_mask & (1u << mv_slot)) &&
+         object_motion && object_motion->Enabled())) {
         object_motion->Attach(state, state.width, state.height);
     }
     return state;
@@ -3591,6 +3651,22 @@ u32 Rasterizer::GetGpuCommandProcessorThreadId() {
 } // namespace Vulkan
 
 namespace Vulkan {
+
+u32 Rasterizer::DrawStatsQuery(const GraphicsPipeline* pipeline, const RenderState& state) {
+    auto* profiler = GpuProfiler::Get();
+    if (!profiler || profiler->Level() < 3) {
+        return ~0u;
+    }
+    const auto& vs = pipeline->GetStage(Shader::SwStage::Vertex);
+    const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+    const u64 ps_hash = ps ? ps->pgm_hash : 0;
+    // The key of MarkDraw's segments: statistics and times print under the same label.
+    return profiler->AllocDrawStats(
+        XXH3_64bits_withSeed(&ps_hash, sizeof(ps_hash), vs.pgm_hash ^ 0xD4A7ull), [&] {
+            return fmt::format("  draws vs {:016x} ps {:016x} ({}x{})", vs.pgm_hash, ps_hash,
+                               state.width, state.height);
+        });
+}
 
 void Rasterizer::MarkPass(const GraphicsPipeline* pipeline, const RenderState& state) {
     auto* profiler = GpuProfiler::Get();
